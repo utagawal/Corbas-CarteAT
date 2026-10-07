@@ -17,7 +17,8 @@ export function createMap(container: HTMLElement, meta: Meta): MLMap {
     container,
     style: meta.map_style_url,
     bounds,
-    fitBoundsOptions: { padding: 20 },
+    // Sur grand écran, le panneau flottant (400 px) recouvre la gauche de la carte.
+    fitBoundsOptions: { padding: window.matchMedia('(max-width: 899px)').matches ? 16 : { top: 40, bottom: 40, left: 440, right: 40 } },
     maxZoom: 19,
     minZoom: 11,
     attributionControl: { compact: true },

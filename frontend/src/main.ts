@@ -1,23 +1,18 @@
 import './styles.css';
-import '@fontsource/roboto/400.css';
-import '@fontsource/roboto/500.css';
-import '@fontsource/roboto/700.css';
-import '@fontsource/lora/400-italic.css';
-import { ArrowLeft, CalendarDays, Clock, ExternalLink, FileText, Map as MapIcon, MapPin, Signpost, Building2, X } from 'lucide';
+import { ChevronLeft, ChevronRight, ExternalLink, FileText, Map as MapIcon, X } from 'lucide';
 import {
   type Arrete, type Categorie, type Impact, type Meta,
-  CATEGORIES, IMPACTS, IMPACT_ORDER, api, dateCourte, daysBetween, etatTexte, h, icon, jourCourt, mainImpact,
-  moisCourt, parseDate, periodeTexte, prefersReducedMotion, today,
+  CATEGORIES, IMPACTS, IMPACT_ORDER, api, dateCourte, daysBetween, etatCourt, etatTexte, h, icon, mainImpact,
+  parseDate, periodeCourte, periodeTexte, prefersReducedMotion, today,
 } from './common';
 import { SRC, boundsOf, createMap, maplibregl, toFeatures } from './mapbase';
 
-type Periode = 'tous' | 'en_cours' | '7j' | '30j' | 'historique';
+type Periode = 'tous' | 'en_cours' | '7j' | '30j';
 const PERIODES: [Periode, string][] = [
-  ['tous', 'En cours et à venir'],
+  ['tous', 'Tout'],
   ['en_cours', "Aujourd'hui"],
   ['7j', '7 jours'],
   ['30j', '30 jours'],
-  ['historique', 'Historique'],
 ];
 
 const state = {
@@ -25,6 +20,7 @@ const state = {
   actuels: [] as Arrete[],
   tous: null as Arrete[] | null,
   periode: 'tous' as Periode,
+  historique: false,
   categories: new Set<Categorie>(),
   impacts: new Set<Impact>(),
   q: '',
@@ -36,12 +32,26 @@ const app = $('app');
 const liste = $('liste');
 const detail = $('detail');
 const compteur = $('compteur');
-let map: maplibregl.Map;
+const filtres = $('filtres');
+let map: maplibregl.Map | undefined;
 const markers = new Map<string, maplibregl.Marker>();
 const mobile = window.matchMedia('(max-width: 899px)');
 let mapShown = !mobile.matches;
 
 if (new URLSearchParams(location.search).get('embed') === '1') document.body.classList.add('embed');
+
+// ------------------------------------------------------------------------- données
+async function loadTous(): Promise<boolean> {
+  if (state.tous) return true;
+  try {
+    state.tous = await api<Arrete[]>('api/arretes?periode=tous');
+    return true;
+  } catch (e) {
+    console.error(e);
+    compteur.textContent = 'Impossible de charger les arrêtés terminés.';
+    return false;
+  }
+}
 
 // ------------------------------------------------------------------------- filtres
 function norm(s: string) {
@@ -49,7 +59,7 @@ function norm(s: string) {
 }
 
 function filtered(): Arrete[] {
-  const src = state.periode === 'historique' ? state.tous ?? [] : state.actuels;
+  const src = state.historique ? state.tous ?? state.actuels : state.actuels;
   const t = today();
   const q = norm(state.q.trim());
   return src.filter((a) => {
@@ -57,7 +67,8 @@ function filtered(): Arrete[] {
     if (state.impacts.size && !a.impacts.some((i) => state.impacts.has(i))) return false;
     const deb = parseDate(a.date_debut);
     const fin = parseDate(a.date_fin) ?? deb;
-    if (state.periode !== 'historique' && fin && fin < t) return false;
+    const termine = fin !== null && fin < t;
+    if (termine && !(state.historique && state.periode === 'tous')) return false;
     if (state.periode === 'en_cours' && (!deb || deb > t)) return false;
     if (state.periode === '7j' && deb && daysBetween(t, deb) > 7) return false;
     if (state.periode === '30j' && deb && daysBetween(t, deb) > 30) return false;
@@ -74,19 +85,17 @@ function buildFilters() {
   for (const [k, label] of PERIODES) {
     const id = `periode-${k}`;
     const input = h('input', { type: 'radio', name: 'periode', id, value: k, checked: k === state.periode });
-    input.addEventListener('change', async () => {
+    input.addEventListener('change', () => {
       state.periode = k;
-      if (k === 'historique' && !state.tous) {
-        compteur.textContent = 'Chargement de l’historique…';
-        state.tous = await api<Arrete[]>('api/arretes?periode=tous');
-      }
       render();
     });
     per.append(h('span', { class: 'seg-item' }, input, h('label', { for: id }, label)));
   }
-  const chip = <K extends string>(set: Set<K>, key: K, label: string, color: string, ic: Parameters<typeof icon>[0]) => {
-    const b = h('button', { type: 'button', class: 'chip', 'aria-pressed': 'false' }, icon(ic, 16), h('span', {}, label));
-    b.style.setProperty('--chip', color);
+
+  const chip = <K extends string>(set: Set<K>, key: K, label: string, color: string) => {
+    const b = h('button', { type: 'button', class: 'chip', 'aria-pressed': 'false' },
+      h('span', { class: 'dot', 'aria-hidden': 'true' }), label);
+    b.style.setProperty('--c', color);
     b.addEventListener('click', () => {
       if (set.has(key)) set.delete(key);
       else set.add(key);
@@ -95,12 +104,27 @@ function buildFilters() {
     });
     return b;
   };
-  const fc = $('f-categories');
   for (const [k, c] of Object.entries(CATEGORIES) as [Categorie, (typeof CATEGORIES)[Categorie]][]) {
-    fc.append(chip(state.categories, k, c.court, c.couleur, c.icone));
+    $('f-categories').append(chip(state.categories, k, c.court, c.couleur));
   }
-  const fi = $('f-impacts');
-  for (const k of IMPACT_ORDER) fi.append(chip(state.impacts, k, IMPACTS[k].court, IMPACTS[k].couleur, IMPACTS[k].icone));
+  for (const k of IMPACT_ORDER) $('f-impacts').append(chip(state.impacts, k, IMPACTS[k].court, IMPACTS[k].couleur));
+
+  const toggle = $<HTMLButtonElement>('btn-filtres');
+  const panel = $('plus-filtres');
+  toggle.addEventListener('click', () => {
+    panel.hidden = !panel.hidden;
+    toggle.setAttribute('aria-expanded', String(!panel.hidden));
+  });
+
+  const hist = $<HTMLInputElement>('f-historique');
+  hist.addEventListener('change', async () => {
+    if (hist.checked && !(await loadTous())) {
+      hist.checked = false;
+      return;
+    }
+    state.historique = hist.checked;
+    render();
+  });
 
   const search = $<HTMLInputElement>('recherche');
   let timer: number | undefined;
@@ -109,14 +133,16 @@ function buildFilters() {
     timer = window.setTimeout(() => {
       state.q = search.value;
       render();
-    }, 200);
+    }, 150);
   });
-  $('filtres').addEventListener('submit', (e) => e.preventDefault());
+  filtres.addEventListener('submit', (e) => e.preventDefault());
   $('reinit').addEventListener('click', () => {
     state.categories.clear();
     state.impacts.clear();
+    state.historique = false;
     state.q = '';
     search.value = '';
+    hist.checked = false;
     document.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', 'false'));
     render();
   });
@@ -132,73 +158,73 @@ function groupe(a: Arrete, t: Date): string {
   const d = daysBetween(t, deb);
   const finSemaine = 7 - ((t.getDay() + 6) % 7); // jours restants jusqu'à lundi prochain
   if (d < finSemaine) return 'Cette semaine';
-  if (d < finSemaine + 7) return 'La semaine prochaine';
+  if (d < finSemaine + 7) return 'Semaine prochaine';
   const m = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(deb);
-  return `En ${m}`;
+  return m[0].toUpperCase() + m.slice(1);
 }
 
 function sortList(list: Arrete[], t: Date): Arrete[] {
   const key = (a: Arrete) => {
     const fin = parseDate(a.date_fin) ?? parseDate(a.date_debut);
-    const term = fin && fin < t;
-    // en cours/à venir : par date de début ; terminés : du plus récent au plus ancien
-    return term ? `z${String(99999999 - Number((a.date_fin ?? '').replace(/-/g, '')))}` : `a${a.date_debut ?? '9'}`;
+    // en cours / à venir : par date de début ; terminés : du plus récent au plus ancien
+    if (fin && fin < t) return `z${String(99999999 - Number((a.date_fin ?? '').replace(/-/g, '')))}`;
+    return `a${a.date_debut ?? '9'}${a.date_fin ?? ''}`;
   };
   return [...list].sort((x, y) => key(x).localeCompare(key(y)));
 }
 
-function item(a: Arrete): HTMLElement {
+function row(a: Arrete): HTMLElement {
   const cat = CATEGORIES[a.categorie] ?? CATEGORIES.autre;
-  const deb = parseDate(a.date_debut);
-  const etat = etatTexte(a);
-  const date = deb
-    ? h('span', { class: 'cal', 'aria-hidden': 'true' },
-        h('span', { class: 'cal-m' }, moisCourt(deb)), h('span', { class: 'cal-d' }, String(deb.getDate())),
-        h('span', { class: 'cal-w' }, jourCourt(deb)))
-    : h('span', { class: 'cal cal-unknown', 'aria-hidden': 'true' }, '?');
-  const impacts = h('ul', { class: 'impacts-mini', 'aria-label': 'Conséquences' },
-    ...a.impacts.filter((i) => i !== 'vitesse').map((i) => {
-      const li = h('li', { title: IMPACTS[i].label }, icon(IMPACTS[i].icone, 14), h('span', { class: 'sr-only' }, IMPACTS[i].label));
-      li.style.setProperty('--c', IMPACTS[i].couleur);
-      return li;
-    }));
-  const btn = h('button', { type: 'button', class: 'item-btn', 'aria-describedby': `etat-${a.id}` },
-    date,
-    h('span', { class: 'item-body' },
-      h('span', { class: 'item-cat' }, icon(cat.icone, 14), cat.court),
-      h('span', { class: 'item-title' }, a.titre),
-      a.lieu ? h('span', { class: 'item-lieu' }, a.lieu) : null,
-      h('span', { class: `etat ${etat.classe}`, id: `etat-${a.id}` }, etat.texte),
+  const imp = mainImpact(a);
+  const etat = etatCourt(a);
+  const ic = h('span', { class: `row-icon ${etat.classe}`, 'aria-hidden': 'true' }, icon(cat.icone, 18));
+  ic.style.setProperty('--cat', cat.couleur);
+  const impact = imp ? h('span', { class: 'row-impact' }, IMPACTS[imp].court) : null;
+  impact?.style.setProperty('--c', IMPACTS[imp!].couleur);
+  const btn = h('button', { type: 'button', class: 'row-btn' },
+    ic,
+    h('span', { class: 'row-main' },
+      h('span', { class: 'row-title' }, a.titre),
+      a.lieu ? h('span', { class: 'row-sub' }, a.lieu) : null,
+      h('span', { class: 'row-meta' }, impact, impact ? h('span', { 'aria-hidden': 'true' }, ' · ') : null,
+        h('span', {}, periodeCourte(a))),
     ),
+    // L'état (en cours, à venir…) est déjà donné par le titre du groupe : pas de pastille ici.
+    h('span', { class: 'row-trail' }, icon(ChevronRight, 16)),
   );
-  btn.style.setProperty('--cat', cat.couleur);
-  btn.addEventListener('click', () => select(a.id, { fly: true, fromList: true }));
+  btn.addEventListener('click', () => select(a.id, { fly: true }));
   btn.addEventListener('mouseenter', () => highlight(a.id, true));
   btn.addEventListener('mouseleave', () => highlight(a.id, false));
-  const li = h('li', { class: 'item', 'data-id': a.id }, btn, a.impacts.length ? impacts : null);
-  return li;
+  btn.addEventListener('focus', () => highlight(a.id, true));
+  btn.addEventListener('blur', () => highlight(a.id, false));
+  return h('li', { class: 'row', 'data-id': a.id }, btn);
 }
 
 function renderList(list: Arrete[]) {
   const t = today();
   liste.replaceChildren();
   if (!list.length) {
-    liste.append(h('p', { class: 'empty' }, state.actuels.length || state.periode === 'historique'
-      ? 'Aucun arrêté ne correspond à ces critères.'
-      : 'Aucun travaux ni événement en cours ou annoncé pour le moment.'));
+    const vide = !state.actuels.length && !state.historique;
+    liste.append(h('div', { class: 'empty' },
+      h('p', { class: 'empty-title' }, vide ? 'Rien à signaler' : 'Aucun résultat'),
+      h('p', {}, vide
+        ? 'Aucun travaux ni événement en cours ou annoncé sur la voie publique.'
+        : 'Essayez une autre période ou retirez des filtres.')));
     return;
   }
-  let current = '';
-  let ol: HTMLOListElement | null = null;
+  const groups = new Map<string, Arrete[]>();
   for (const a of sortList(list, t)) {
     const g = groupe(a, t);
-    if (g !== current) {
-      current = g;
-      const hid = `g-${liste.children.length}`;
-      ol = h('ol', { class: 'items', 'aria-labelledby': hid });
-      liste.append(h('h2', { class: 'group-title', id: hid }, g), ol);
-    }
-    ol!.append(item(a));
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g)!.push(a);
+  }
+  let i = 0;
+  for (const [g, items] of groups) {
+    const hid = `g-${i++}`;
+    liste.append(
+      h('h2', { class: 'group-title', id: hid }, g, h('span', { class: 'group-count' }, String(items.length))),
+      h('ul', { class: 'group', 'aria-labelledby': hid }, ...items.map(row)),
+    );
   }
 }
 
@@ -206,50 +232,58 @@ function renderList(list: Arrete[]) {
 function renderDetail(a: Arrete) {
   const cat = CATEGORIES[a.categorie] ?? CATEGORIES.autre;
   const etat = etatTexte(a);
-  const back = h('button', { type: 'button', class: 'back' }, icon(ArrowLeft, 18), 'Retour à la liste');
+  const back = h('button', { type: 'button', class: 'back' }, icon(ChevronLeft, 20), 'Liste');
   back.addEventListener('click', () => select(null));
-  const row = (ic: Parameters<typeof icon>[0], title: string, ...content: (Node | string | null)[]) =>
-    h('div', { class: 'd-row' }, icon(ic, 20), h('div', {}, h('h3', {}, title), ...content));
 
-  const quand = [h('p', {}, periodeTexte(a))];
-  if (a.horaires.length) quand.push(h('p', { class: 'muted' }, icon(Clock, 14), ' ', a.horaires.join(', ')));
-  if (a.remarques.length) quand.push(h('p', { class: 'muted' }, a.remarques.join(', ')));
+  const item = (label: string, ...content: (Node | string | null)[]) =>
+    h('div', { class: 'cell' }, h('dt', {}, label), h('dd', {}, ...content));
 
-  const conseq = h('ul', { class: 'd-impacts' },
-    ...a.impacts.map((i) => {
-      const li = h('li', {}, icon(IMPACTS[i].icone, 18), IMPACTS[i].label);
-      li.style.setProperty('--c', IMPACTS[i].couleur);
-      return li;
-    }));
+  const quand: (Node | string)[] = [periodeTexte(a)];
+  if (a.horaires.length) quand.push(h('span', { class: 'cell-note' }, a.horaires.join(', ')));
+  if (a.remarques.length) quand.push(h('span', { class: 'cell-note' }, a.remarques.join(', ')));
 
-  const voir = h('button', { type: 'button', class: 'btn btn-outline only-mobile' }, icon(MapIcon, 18), 'Voir sur la carte');
+  const conseq = a.impacts.length
+    ? h('ul', { class: 'impacts' }, ...a.impacts.map((i) => {
+        const li = h('li', {}, h('span', { class: 'dot', 'aria-hidden': 'true' }), IMPACTS[i].label);
+        li.style.setProperty('--c', IMPACTS[i].couleur);
+        return li;
+      }))
+    : null;
+
+  const voir = h('button', { type: 'button', class: 'btn btn-tinted only-mobile' }, icon(MapIcon, 18), 'Voir sur la carte');
   voir.addEventListener('click', () => {
     setView('carte');
     fly(a);
   });
 
+  const ic = h('span', { class: 'd-icon', 'aria-hidden': 'true' }, icon(cat.icone, 24));
+  ic.style.setProperty('--cat', cat.couleur);
+
   detail.replaceChildren(...[
     back,
     h('header', { class: 'd-head' },
-      h('span', { class: 'd-cat' }, icon(cat.icone, 16), cat.label),
+      ic,
+      h('p', { class: 'd-cat' }, cat.label),
       h('h2', { id: 'detail-titre' }, a.titre),
-      h('span', { class: `etat ${etat.classe}` }, etat.texte),
+      h('span', { class: `pill ${etat.classe}` }, etat.texte),
     ),
-    row(CalendarDays, 'Quand ?', ...quand),
-    row(MapPin, 'Où ?', h('p', {}, a.lieu || 'Voir le document officiel')),
-    a.impacts.length ? h('div', { class: 'd-row d-row-wide' }, h('h3', {}, 'Conséquences'), conseq) : null,
-    a.deviation.length ? row(Signpost, 'Itinéraire de déviation', h('p', {}, a.deviation.join(', '))) : null,
-    a.intervenant ? row(Building2, 'Intervenant', h('p', {}, a.intervenant)) : null,
+    h('dl', { class: 'cells' },
+      item('Quand', ...quand),
+      item('Où', a.lieu || 'Voir le document officiel'),
+      conseq ? item('Conséquences', conseq) : null,
+      a.deviation.length ? item('Déviation', a.deviation.join(', ')) : null,
+      a.intervenant ? item('Intervenant', a.intervenant) : null,
+    ),
     a.note ? h('p', { class: 'd-note' }, a.note) : null,
     h('div', { class: 'd-actions' },
-      voir,
       a.pdf_url
         ? h('a', { class: 'btn', href: a.pdf_url, target: '_blank', rel: 'noopener' },
-            icon(FileText, 18), `Arrêté ${a.numero} (PDF)`, icon(ExternalLink, 14),
-            h('span', { class: 'sr-only' }, ' – ouvre un nouvel onglet'))
+            icon(FileText, 18), `Arrêté ${a.numero}`, icon(ExternalLink, 14),
+            h('span', { class: 'sr-only' }, ' (PDF, nouvel onglet)'))
         : null,
+      voir,
     ),
-    h('p', { class: 'd-legal muted' }, 'Informations extraites automatiquement de l’arrêté officiel, qui seul fait foi.'),
+    h('p', { class: 'd-legal' }, 'Informations extraites automatiquement de l’arrêté officiel, qui seul fait foi.'),
   ].filter((n): n is HTMLElement => n !== null));
   detail.setAttribute('aria-labelledby', 'detail-titre');
 }
@@ -257,14 +291,12 @@ function renderDetail(a: Arrete) {
 // ------------------------------------------------------------------------- carte
 function markerEl(a: Arrete): HTMLElement {
   const cat = CATEGORIES[a.categorie] ?? CATEGORIES.autre;
-  const imp = mainImpact(a);
-  const el = h('div', { class: `marker ${a.etat === 'a_venir' ? 'is-future' : ''}`, title: a.titre });
+  const el = h('div', { class: `marker ${etatCourt(a).classe}`, title: a.titre });
   el.style.setProperty('--cat', cat.couleur);
-  if (imp) el.style.setProperty('--imp', IMPACTS[imp].couleur);
-  el.append(icon(cat.icone, 18));
+  el.append(icon(cat.icone, 16));
   el.addEventListener('click', (e) => {
     e.stopPropagation();
-    select(a.id, { fly: false, fromMap: true });
+    select(a.id, { fromMap: true });
   });
   return el;
 }
@@ -298,9 +330,11 @@ function highlight(id: string, on: boolean) {
 function fly(a: Arrete) {
   if (!map) return;
   const b = boundsOf(a.geojson);
-  const opts = { padding: mobile.matches ? 60 : 120, maxZoom: 17, duration: prefersReducedMotion() ? 0 : 800 };
-  if (b) map.fitBounds(b, opts);
-  else if (a.centre) map.easeTo({ center: a.centre, zoom: 16, duration: opts.duration });
+  // Sur grand écran, le panneau flottant masque la gauche de la carte : on décale le cadrage.
+  const padding = mobile.matches ? 48 : { top: 80, bottom: 80, left: 460, right: 80 };
+  const duration = prefersReducedMotion() ? 0 : 700;
+  if (b) map.fitBounds(b, { padding, maxZoom: 17, duration });
+  else if (a.centre) map.easeTo({ center: a.centre, zoom: 16, duration });
 }
 
 // ------------------------------------------------------------------------- sélection & vues
@@ -309,30 +343,32 @@ function findArrete(id: string | null): Arrete | undefined {
   return state.actuels.find((a) => a.id === id) ?? state.tous?.find((a) => a.id === id);
 }
 
-function select(id: string | null, o: { fly?: boolean; fromList?: boolean; fromMap?: boolean; silent?: boolean } = {}) {
+function select(id: string | null, o: { fly?: boolean; fromMap?: boolean; silent?: boolean } = {}) {
   const prev = state.selected;
-  state.selected = id;
   const a = findArrete(id);
+  state.selected = a ? a.id : null;
+  app.classList.toggle('has-detail', !!a);
   if (a) {
     renderDetail(a);
     detail.hidden = false;
     liste.hidden = true;
-    $('filtres').hidden = true;
-    compteur.hidden = true;
+    filtres.hidden = true;
     if (o.fly) fly(a);
     if (o.fromMap && mobile.matches) showPreview(a);
     else hidePreview();
-    if (!o.fromMap || !mobile.matches) detail.focus({ preventScroll: false });
+    if (!(o.fromMap && mobile.matches)) {
+      // Remonter le seul panneau (scrollIntoView ferait défiler toute la page sur mobile).
+      $('panneau').scrollTop = 0;
+      detail.focus({ preventScroll: true });
+    }
     if (!o.silent) history.replaceState(null, '', `#at=${encodeURIComponent(a.id)}`);
   } else {
-    state.selected = null;
     detail.hidden = true;
     liste.hidden = false;
-    $('filtres').hidden = false;
-    compteur.hidden = false;
+    filtres.hidden = false;
     hidePreview();
     history.replaceState(null, '', location.pathname + location.search);
-    const btn = prev ? liste.querySelector<HTMLButtonElement>(`[data-id="${CSS.escape(prev)}"] .item-btn`) : null;
+    const btn = prev ? liste.querySelector<HTMLButtonElement>(`[data-id="${CSS.escape(prev)}"] .row-btn`) : null;
     (btn ?? liste).focus();
   }
   renderMap(filtered());
@@ -341,11 +377,11 @@ function select(id: string | null, o: { fly?: boolean; fromList?: boolean; fromM
 function showPreview(a: Arrete) {
   let p = document.getElementById('apercu');
   if (!p) {
-    p = h('div', { id: 'apercu', class: 'preview', role: 'dialog', 'aria-label': 'Aperçu' });
+    p = h('div', { id: 'apercu', class: 'preview', role: 'dialog', 'aria-label': 'Aperçu de l’arrêté' });
     $('carte-zone').append(p);
   }
-  const etat = etatTexte(a);
-  const close = h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Fermer l’aperçu' }, icon(X, 18));
+  const etat = etatCourt(a);
+  const close = h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Fermer' }, icon(X, 16));
   close.addEventListener('click', () => select(null));
   const more = h('button', { type: 'button', class: 'btn' }, 'Voir le détail');
   more.addEventListener('click', () => {
@@ -354,9 +390,8 @@ function showPreview(a: Arrete) {
   });
   p.replaceChildren(
     close,
-    h('strong', {}, a.titre),
-    h('span', { class: `etat ${etat.classe}` }, etat.texte),
-    h('span', { class: 'muted' }, periodeTexte(a)),
+    h('p', { class: 'preview-title' }, a.titre),
+    h('p', { class: 'preview-meta' }, etat.texte ? h('span', { class: `pill ${etat.classe}` }, etat.texte) : null, ' ', periodeCourte(a)),
     more,
   );
   p.hidden = false;
@@ -380,7 +415,7 @@ function setView(v: 'liste' | 'carte') {
       map.resize();
       // La carte a été créée masquée (largeur nulle) : on recadre sur la commune au premier affichage.
       if (!mapShown && !state.selected && state.meta?.bounds) {
-        map.fitBounds(state.meta.bounds as [number, number, number, number], { padding: 20, duration: 0 });
+        map.fitBounds(state.meta.bounds as [number, number, number, number], { padding: 16, duration: 0 });
       }
       mapShown = true;
     });
@@ -399,6 +434,7 @@ function buildViewSwitch() {
       }
     });
   });
+  mobile.addEventListener('change', () => map?.resize());
 }
 
 // ------------------------------------------------------------------------- rendu global
@@ -406,7 +442,7 @@ function render() {
   const list = filtered();
   const n = list.length;
   compteur.textContent = n === 0 ? 'Aucun arrêté' : `${n} arrêté${n > 1 ? 's' : ''}`;
-  const nbF = state.categories.size + state.impacts.size;
+  const nbF = state.categories.size + state.impacts.size + (state.historique ? 1 : 0);
   const badge = $('nb-filtres');
   badge.hidden = nbF === 0;
   badge.textContent = String(nbF);
@@ -417,16 +453,31 @@ function render() {
 
 function buildLegend() {
   const lg = $('legende');
-  const items = (['route_barree', 'circulation_alternee', 'stationnement', 'trottoir'] as Impact[]).map((i) => {
+  const lines = (['route_barree', 'circulation_alternee', 'stationnement', 'trottoir'] as Impact[]).map((i) => {
     const sw = h('span', { class: 'sw' });
-    sw.style.background = IMPACTS[i].couleur;
+    sw.style.background = IMPACTS[i].carte;
     return h('li', {}, sw, IMPACTS[i].court);
   });
-  const dev = h('li', {}, h('span', { class: 'sw sw-dash' }), 'Déviation');
-  const futur = h('li', {}, h('span', { class: 'sw-marker is-future' }), 'À venir');
-  const encours = h('li', {}, h('span', { class: 'sw-marker' }), 'En cours');
-  lg.append(h('ul', {}, ...items, dev, encours, futur));
+  lg.append(h('ul', {},
+    ...lines,
+    h('li', {}, h('span', { class: 'sw sw-dash' }), 'Déviation'),
+    h('li', {}, h('span', { class: 'sw-dot en-cours' }), 'En cours'),
+    h('li', {}, h('span', { class: 'sw-dot a-venir' }), 'À venir'),
+  ));
   (lg as HTMLDetailsElement).open = !mobile.matches;
+}
+
+async function openFromHash() {
+  const m = location.hash.match(/at=([^&]+)/);
+  if (!m) return;
+  const id = decodeURIComponent(m[1]);
+  if (!findArrete(id) && (await loadTous()) && state.tous?.some((a) => a.id === id)) {
+    // Lien vers un arrêté terminé : on bascule sur l'historique pour pouvoir l'afficher.
+    state.historique = true;
+    $<HTMLInputElement>('f-historique').checked = true;
+    render();
+  }
+  if (findArrete(id)) select(id, { fly: true, silent: true });
 }
 
 async function init() {
@@ -440,30 +491,27 @@ async function init() {
     if (meta.registre_url) $<HTMLAnchorElement>('lien-registre').href = meta.registre_url;
     if (meta.derniere_synchro) {
       const d = new Date(meta.derniere_synchro);
-      $('maj').textContent = `Dernière mise à jour : ${dateCourte(d)} ${d.getFullYear()} à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}.`;
+      $('maj').textContent = `Mis à jour le ${dateCourte(d)} ${d.getFullYear()} à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}.`;
     }
-    map = createMap($('carte'), meta);
-    map.on('load', () => {
+    render();
+    const m = createMap($('carte'), meta);
+    map = m;
+    m.on('load', () => {
       render();
-      const m = location.hash.match(/at=([^&]+)/);
-      if (m) {
-        const id = decodeURIComponent(m[1]);
-        if (findArrete(id)) select(id, { fly: true, silent: true });
-      }
+      void openFromHash();
     });
     for (const layer of ['impact-line', 'zone-fill', 'impact-point']) {
-      map.on('click', layer, (e) => {
+      m.on('click', layer, (e) => {
         const id = e.features?.[0]?.properties?.id as string | undefined;
         if (id) select(id, { fromMap: true });
       });
-      map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'));
-      map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''));
+      m.on('mouseenter', layer, () => (m.getCanvas().style.cursor = 'pointer'));
+      m.on('mouseleave', layer, () => (m.getCanvas().style.cursor = ''));
     }
-    render();
   } catch (e) {
     compteur.textContent = 'Impossible de charger les données. Veuillez réessayer plus tard.';
     console.error(e);
   }
 }
 
-init();
+void init();
