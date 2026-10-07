@@ -1,5 +1,5 @@
 import './styles.css';
-import { ChevronLeft, ChevronRight, ExternalLink, FileText, Map as MapIcon, X } from 'lucide';
+import { ArrowRight, ChevronLeft, ChevronRight, Clock, ExternalLink, FileText, Map as MapIcon, X } from 'lucide';
 import {
   type Arrete, type Categorie, type Impact, type Meta,
   CATEGORIES, IMPACTS, IMPACT_ORDER, api, dateCourte, daysBetween, etatCourt, etatTexte, h, icon, mainImpact,
@@ -238,9 +238,6 @@ function renderDetail(a: Arrete) {
   const item = (label: string, ...content: (Node | string | null)[]) =>
     h('div', { class: 'cell' }, h('dt', {}, label), h('dd', {}, ...content));
 
-  const quand: (Node | string)[] = [periodeTexte(a)];
-  if (a.horaires.length) quand.push(h('span', { class: 'cell-note' }, a.horaires.join(', ')));
-  if (a.remarques.length) quand.push(h('span', { class: 'cell-note' }, a.remarques.join(', ')));
 
   const conseq = a.impacts.length
     ? h('ul', { class: 'impacts' }, ...a.impacts.map((i) => {
@@ -267,8 +264,8 @@ function renderDetail(a: Arrete) {
       h('h2', { id: 'detail-titre' }, a.titre),
       h('span', { class: `pill ${etat.classe}` }, etat.texte),
     ),
+    quandBlock(a),
     h('dl', { class: 'cells' },
-      item('Quand', ...quand),
       item('Où', a.lieu || 'Voir le document officiel'),
       conseq ? item('Conséquences', conseq) : null,
       a.deviation.length ? item('Déviation', a.deviation.join(', ')) : null,
@@ -286,6 +283,105 @@ function renderDetail(a: Arrete) {
     h('p', { class: 'd-legal' }, 'Informations extraites automatiquement de l’arrêté officiel, qui seul fait foi.'),
   ].filter((n): n is HTMLElement => n !== null));
   detail.setAttribute('aria-labelledby', 'detail-titre');
+}
+
+// ------------------------------------------------------------------------- « Quand » (façon Calendrier)
+const fmtJourSem = new Intl.DateTimeFormat('fr-FR', { weekday: 'short' });
+const fmtMoisLong = new Intl.DateTimeFormat('fr-FR', { month: 'short' });
+
+/** Page de calendrier : bandeau (jour de la semaine), numéro du jour, mois. */
+function calTile(d: Date, horaire?: string): HTMLElement {
+  return h('div', { class: 'cal-tile' },
+    h('span', { class: 'cal-top' }, fmtJourSem.format(d).replace('.', '')),
+    h('span', { class: 'cal-day' }, String(d.getDate())),
+    h('span', { class: 'cal-month' }, fmtMoisLong.format(d).replace('.', '')),
+    horaire ? h('span', { class: 'cal-hours' }, horaire) : null,
+  );
+}
+
+/** « 7h00–17h00 » → « 7h–17h », « 8h30–12h00 » → « 8h30–12h ». */
+function heureCourte(s: string): string {
+  return s.replace(/(\d{1,2})h00\b/g, '$1h');
+}
+
+function plural(n: number, mot: string) {
+  return `${n} ${mot}${n > 1 ? 's' : ''}`;
+}
+
+function quandBlock(a: Arrete): HTMLElement {
+  const deb = parseDate(a.date_debut);
+  const fin = parseDate(a.date_fin) ?? deb;
+  const box = h('section', { class: 'when', 'aria-labelledby': 'when-title' },
+    h('h3', { class: 'when-title', id: 'when-title' }, 'Quand'));
+  if (!deb || !fin) {
+    box.append(h('p', { class: 'when-text' }, 'Dates à préciser : voir le document officiel.'));
+    return box;
+  }
+  const t = today();
+  // Texte complet pour les lecteurs d'écran ; le visuel est décoratif.
+  box.append(h('p', { class: 'sr-only' }, periodeTexte(a) + (a.horaires.length ? `, ${a.horaires.join(', ')}` : '')));
+  const visual = h('div', { class: 'when-visual', 'aria-hidden': 'true' });
+  box.append(visual);
+
+  let horairesAffiches = false;
+  if (a.jours.length > 1) {
+    // Jours distincts (ex. déménagement vendredi soir et samedi) : une page par jour,
+    // avec l'horaire correspondant quand l'arrêté en donne un par jour.
+    const parJour = a.horaires.length === a.jours.length;
+    horairesAffiches = parJour;
+    visual.append(h('div', { class: 'cal-row' },
+      ...a.jours.map((j, i) => calTile(parseDate(j)!, parJour ? heureCourte(a.horaires[i]) : undefined))));
+  } else if (deb.getTime() === fin.getTime()) {
+    visual.append(h('div', { class: 'cal-row' }, calTile(deb)));
+  } else {
+    visual.append(...periodeVisuelle(deb, fin, t));
+  }
+  if (a.jours.length > 1 || deb.getTime() === fin.getTime()) {
+    // Jours isolés : simple repère temporel, sans barre de progression.
+    const [etat, label] = deb > t
+      ? ['a-venir', daysBetween(t, deb) === 1 ? 'Demain' : `Dans ${plural(daysBetween(t, deb), 'jour')}`]
+      : fin < t ? ['termine', 'Terminé'] : ['en-cours', deb.getTime() === fin.getTime() ? "Aujourd'hui" : 'En cours'];
+    visual.append(h('div', { class: `progress ${etat}` }, h('span', { class: 'progress-label' }, label)));
+  }
+
+  let notes = [...(horairesAffiches ? [] : a.horaires), ...a.remarques].map(heureCourte);
+  if (notes.includes('du lundi au vendredi')) notes = notes.filter((n) => n !== 'hors week-end');
+  if (notes.length) {
+    visual.append(h('ul', { class: 'hours' }, ...notes.map((n) => h('li', {}, icon(Clock, 14), n))));
+  }
+  return box;
+}
+
+function periodeVisuelle(deb: Date, fin: Date, t: Date): HTMLElement[] {
+  const total = daysBetween(deb, fin) + 1;
+  const row = h('div', { class: 'cal-row' },
+    calTile(deb),
+    h('div', { class: 'cal-span' }, icon(ArrowRight, 18), h('span', {}, plural(total, 'jour'))),
+    calTile(fin));
+
+  // Barre de progression : où en est-on aujourd'hui ?
+  let pct = 0;
+  let label: string;
+  let etat = 'a-venir';
+  if (fin < t) {
+    pct = 100;
+    etat = 'termine';
+    label = `Terminé depuis ${plural(daysBetween(fin, t), 'jour')}`;
+  } else if (deb <= t) {
+    const jour = daysBetween(deb, t) + 1;
+    const reste = daysBetween(t, fin);
+    pct = Math.max(4, Math.round((jour / total) * 100));
+    etat = 'en-cours';
+    label = `Jour ${jour} sur ${total} · ${reste === 0 ? "dernier jour aujourd'hui" : `fin dans ${plural(reste, 'jour')}`}`;
+  } else {
+    const dans = daysBetween(t, deb);
+    label = dans === 1 ? 'Commence demain' : `Commence dans ${plural(dans, 'jour')}`;
+  }
+  const fill = h('span', { class: 'progress-fill' });
+  fill.style.width = `${pct}%`;
+  return [row, h('div', { class: `progress ${etat}` },
+    h('span', { class: 'progress-track' }, fill),
+    h('span', { class: 'progress-label' }, label))];
 }
 
 // ------------------------------------------------------------------------- carte
