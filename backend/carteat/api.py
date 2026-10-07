@@ -11,7 +11,7 @@ from typing import Literal
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -126,7 +126,7 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
             if periode == "actuels":
                 q = q.where(or_(Arrete.date_fin >= today.isoformat(), Arrete.date_fin.is_(None)))
             rows = ses.scalars(q.order_by(Arrete.date_debut)).all()
-        return JSONResponse([public_view(r, today) for r in rows], headers={"Cache-Control": "public, max-age=300"})
+        return JSONResponse([public_view(r, today) for r in rows], headers={"Cache-Control": "public, max-age=60"})
 
     # ------------------------------------------------------------------ administration
     def require_admin(request: Request):
@@ -213,7 +213,9 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
                 r.statut = data["statut"]
                 if r.statut == "publie":
                     r.motif_verification = ""
-            if content_change:
+            if content_change or "statut" in data:
+                # Toute décision de l'administrateur (y compris masquer/publier) prime sur les
+                # retraitements automatiques ultérieurs (reprise de géocodage, `cli reprocess`).
                 r.modifie_manuellement = True
             if r.date_debut and r.date_fin and r.date_fin < r.date_debut:
                 raise HTTPException(422, "La date de fin précède la date de début")

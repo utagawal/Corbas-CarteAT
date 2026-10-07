@@ -87,3 +87,11 @@ def test_password_hash_roundtrip():
 def test_head_sur_api_publique(client):
     assert client.head("/api/arretes").status_code == 200
     assert client.head("/healthz").status_code == 200
+
+
+def test_statut_seul_fige_l_arrete(client):
+    h = {"X-Requested-With": "carteat"}
+    client.post("/api/admin/login", json={"password": "motdepasse-test-123"}, headers=h)
+    r = client.put("/api/admin/arretes/a1", json={"statut": "masque"}, headers=h)
+    assert r.json()["modifie_manuellement"] is True
+    assert [a["id"] for a in client.get("/api/arretes").json()] == []

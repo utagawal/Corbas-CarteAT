@@ -54,7 +54,8 @@ class Registry:
             docs = ([a["documentPrincipal"]] if a.get("documentPrincipal") else []) + (a.get("annexes") or [])
             pdf = next((d for d in docs if d.get("mimeType") == "application/pdf"), None)
             acte_id = (pdf or {}).get("url", "").rstrip("/").split("/")[-2] if pdf else None
-            acte_id = acte_id or f"{numero}-{pub}"
+            # Identifiant de secours sans « / » ni espace (utilisé dans les URL d'administration).
+            acte_id = acte_id or re.sub(r"[^A-Za-z0-9_-]+", "-", f"{numero}-{pub}").strip("-")
             res[acte_id] = Acte(
                 id=acte_id,
                 numero=re.sub(r"\s+", " ", numero),

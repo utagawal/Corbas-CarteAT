@@ -77,7 +77,7 @@ du référentiel (`python -m carteat.cli refresh-osm` pour l'avoir tout de suite
 - Les noms et adresses des **particuliers** (déménagements, bennes…) ne sont jamais publiés : le titre
   est reconstruit à partir du type d'intervention et du lieu ; l'adresse de domiciliation du demandeur
   est retirée avant la localisation. Le texte OCR et l'objet du registre restent internes (admin).
-- Aucun cookie hors session d'administration, aucun traceur ; polices auto-hébergées (pas de Google Fonts).
+- Aucun cookie hors session d'administration, aucun traceur ; police système (aucune police téléchargée, pas de Google Fonts).
 - Pages « Mentions légales » et « Déclaration d'accessibilité » fournies : **les éléments surlignés
   (éditeur, hébergeur, DPO, contact) sont à compléter par la mairie.**
 
