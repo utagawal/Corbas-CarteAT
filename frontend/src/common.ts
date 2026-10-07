@@ -54,22 +54,24 @@ export interface Meta {
 }
 
 export const CATEGORIES: Record<Categorie, { label: string; court: string; couleur: string; icone: IconNode }> = {
-  reseaux: { label: 'Travaux de réseaux', court: 'Réseaux', couleur: '#6a3d9a', icone: Cable },
-  voirie: { label: 'Travaux de voirie', court: 'Voirie', couleur: '#b4410c', icone: Construction },
-  chantier: { label: 'Échafaudage, benne, nacelle', court: 'Chantier', couleur: '#7a5a00', icone: Forklift },
-  demenagement: { label: 'Déménagement', court: 'Déménagement', couleur: '#0f766e', icone: Truck },
-  evenement: { label: 'Événement, manifestation', court: 'Événement', couleur: '#be185d', icone: PartyPopper },
-  autre: { label: 'Autre', court: 'Autre', couleur: '#4b5563', icone: Info },
+  reseaux: { label: 'Travaux de réseaux', court: 'Réseaux', couleur: '#4f4dce', icone: Cable },
+  voirie: { label: 'Travaux de voirie', court: 'Voirie', couleur: '#c43c00', icone: Construction },
+  chantier: { label: 'Échafaudage, benne, nacelle', court: 'Chantier', couleur: '#8a5d00', icone: Forklift },
+  demenagement: { label: 'Déménagement', court: 'Déménagement', couleur: '#00786f', icone: Truck },
+  evenement: { label: 'Événement', court: 'Événement', couleur: '#c2185b', icone: PartyPopper },
+  autre: { label: 'Autre', court: 'Autre', couleur: '#6e6e73', icone: Info },
 };
 
 // Ordre = gravité décroissante (la couleur d'un tracé est celle de sa mesure la plus contraignante).
-export const IMPACTS: Record<Impact, { label: string; court: string; couleur: string; icone: IconNode }> = {
-  route_barree: { label: 'Route barrée', court: 'Route barrée', couleur: '#d62828', icone: OctagonX },
-  circulation_alternee: { label: 'Circulation alternée ou rétrécie', court: 'Circulation alternée', couleur: '#e76f00', icone: ArrowLeftRight },
-  stationnement: { label: 'Stationnement neutralisé', court: 'Stationnement', couleur: '#005b94', icone: CircleParking },
-  trottoir: { label: 'Trottoir ou cheminement piéton modifié', court: 'Piétons', couleur: '#7b2cbf', icone: Footprints },
-  vitesse: { label: 'Vitesse limitée', court: 'Vitesse limitée', couleur: '#6b7280', icone: Gauge },
-  deviation: { label: 'Déviation mise en place', court: 'Déviation', couleur: '#262532', icone: Signpost },
+// Couleurs choisies pour un contraste ≥ 4,5:1 sur fond blanc (utilisées aussi en texte).
+// « couleur » : version foncée (texte, contraste AA) ; « carte » : version vive pour les tracés.
+export const IMPACTS: Record<Impact, { label: string; court: string; couleur: string; carte: string; icone: IconNode }> = {
+  route_barree: { label: 'Route barrée', court: 'Route barrée', couleur: '#d70015', carte: '#ff3b30', icone: OctagonX },
+  circulation_alternee: { label: 'Circulation alternée ou rétrécie', court: 'Circulation alternée', couleur: '#b65300', carte: '#ff9500', icone: ArrowLeftRight },
+  stationnement: { label: 'Stationnement neutralisé', court: 'Stationnement', couleur: '#005b94', carte: '#0a84ff', icone: CircleParking },
+  trottoir: { label: 'Trottoir ou cheminement piéton modifié', court: 'Piétons', couleur: '#8944ab', carte: '#af52de', icone: Footprints },
+  vitesse: { label: 'Vitesse limitée', court: 'Vitesse limitée', couleur: '#6e6e73', carte: '#8e8e93', icone: Gauge },
+  deviation: { label: 'Déviation mise en place', court: 'Déviation', couleur: '#1d1d1f', carte: '#1d1d1f', icone: Signpost },
 };
 export const IMPACT_ORDER = Object.keys(IMPACTS) as Impact[];
 
@@ -79,7 +81,7 @@ export function mainImpact(a: Pick<Arrete, 'impacts'>): Impact | null {
 
 export function lineColor(a: Pick<Arrete, 'impacts'>): string {
   const m = mainImpact(a);
-  return m ? IMPACTS[m].couleur : '#4b5563';
+  return m ? IMPACTS[m].carte : '#8e8e93';
 }
 
 export function icon(node: IconNode, size = 18, label?: string): SVGElement {
@@ -117,8 +119,8 @@ export function daysBetween(a: Date, b: Date): number {
 
 export const dateLongue = (d: Date) => fmtLong.format(d);
 export const dateCourte = (d: Date) => fmtCourt.format(d).replace('.', '');
-export const moisCourt = (d: Date) => fmtMois.format(d).replace('.', '');
-export const jourCourt = (d: Date) => fmtJour.format(d).replace('.', '');
+export const moisCourt = (d: Date) => fmtMois.format(d);
+export const jourCourt = (d: Date) => fmtJour.format(d);
 
 export function periodeTexte(a: Arrete): string {
   const deb = parseDate(a.date_debut);
@@ -127,6 +129,34 @@ export function periodeTexte(a: Arrete): string {
   if (a.jours.length > 1) return a.jours.map((j) => dateLongue(parseDate(j)!)).join(' et ');
   if (!fin || fin.getTime() === deb.getTime()) return `Le ${dateLongue(deb)}`;
   return `Du ${dateLongue(deb)} au ${dateLongue(fin)}`;
+}
+
+/** « 9 oct. », « 9 → 30 oct. », « 28 sept. → 25 oct. », « 2 et 3 oct. » */
+export function periodeCourte(a: Pick<Arrete, 'date_debut' | 'date_fin' | 'jours'>): string {
+  const deb = parseDate(a.date_debut);
+  const fin = parseDate(a.date_fin) ?? deb;
+  if (!deb || !fin) return 'Dates à préciser';
+  const jm = (d: Date) => `${d.getDate()} ${moisCourt(d)}`;
+  if (a.jours.length === 2) {
+    const [x, y] = a.jours.map((j) => parseDate(j)!);
+    return x.getMonth() === y.getMonth() ? `${x.getDate()} et ${jm(y)}` : `${jm(x)} et ${jm(y)}`;
+  }
+  if (a.jours.length > 2) return `${a.jours.length} jours à partir du ${jm(deb)}`;
+  if (deb.getTime() === fin.getTime()) return `${jourCourt(deb)} ${jm(deb)}`;
+  const sameMonth = deb.getMonth() === fin.getMonth() && deb.getFullYear() === fin.getFullYear();
+  const yearFin = fin.getFullYear() !== today().getFullYear() ? ` ${fin.getFullYear()}` : '';
+  return `${sameMonth ? deb.getDate() : jm(deb)} → ${jm(fin)}${yearFin}`;
+}
+
+/** Étiquette courte pour les listes : « En cours », « Demain », « Dans 5 j », « Terminé ». */
+export function etatCourt(a: Arrete, t = today()): { texte: string; classe: string } {
+  const deb = parseDate(a.date_debut);
+  const fin = parseDate(a.date_fin) ?? deb;
+  if (!deb || !fin) return { texte: '', classe: 'inconnu' };
+  if (fin < t) return { texte: 'Terminé', classe: 'termine' };
+  if (deb <= t) return { texte: 'En cours', classe: 'en-cours' };
+  const d = daysBetween(t, deb);
+  return { texte: d === 1 ? 'Demain' : `Dans ${d} j`, classe: 'a-venir' };
 }
 
 export function etatTexte(a: Arrete, t = today()): { texte: string; classe: string } {

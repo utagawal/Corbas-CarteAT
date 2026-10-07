@@ -215,6 +215,7 @@ def build_title(objet: str | None, categorie: str, lieu: str | None, particulier
     t = anonymize(objet)
     t = re.sub(r"\s*Voies?\s+M[ée]tropoles?\.?\s*$", "", t, flags=re.I)
     t = re.sub(r"^ARR[ÊE]T[ÉE]\s+TEMPORAIRE\s*[-–:]?\s*", "", t, flags=re.I)
+    t = re.sub(r"\s*-{2,}\s*|\s+[-–—]\s+", " – ", t)  # « Echafaudage -- 68 av. » → « Echafaudage – 68 av. »
     t = t.strip(" -–/,.")
     if len(t) > 160:
         t = t[:157].rsplit(" ", 1)[0] + "…"

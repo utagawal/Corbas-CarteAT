@@ -139,3 +139,9 @@ def test_lieu_dit_utilise_le_contour_osm(idx):
     g = idx.lieux["Parc de Loisirs"]
     osm_geom = next(geom for _, name, geom in idx.places if name == "Parc de Loisirs de Corbas")
     assert g.equals(osm_geom) and g.area > 50_000
+
+
+def test_titre_tirets_normalises():
+    from carteat.pipeline import build_title
+    assert build_title("Echafaudage -- 68 Avenue du 8 mai 1945", "chantier", None, False, "AT 1/26") == "Echafaudage – 68 Avenue du 8 mai 1945"
+    assert build_title("Raccordement Gaz - 6 Chemin de Grange Blanche", "reseaux", None, False, "x") == "Raccordement Gaz – 6 Chemin de Grange Blanche"

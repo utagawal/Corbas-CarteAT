@@ -1,8 +1,5 @@
 import './styles.css';
 import './admin.css';
-import '@fontsource/roboto/400.css';
-import '@fontsource/roboto/500.css';
-import '@fontsource/roboto/700.css';
 import { Check, Eraser, FileText, MapPin, MousePointerClick, RefreshCw, Spline, Trash2, Undo2, X } from 'lucide';
 import { type Arrete, type Categorie, type Impact, type Meta, CATEGORIES, IMPACTS, IMPACT_ORDER, api, h, icon } from './common';
 import { boundsOf, createMap, maplibregl } from './mapbase';

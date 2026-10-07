@@ -11,7 +11,7 @@ from typing import Literal
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -95,11 +95,11 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
                        same_site="strict", https_only=s.cookie_secure)
 
     # ------------------------------------------------------------------ public
-    @app.get("/healthz")
+    @app.api_route("/healthz", methods=["GET", "HEAD"])
     def healthz():
         return {"ok": True}
 
-    @app.get("/api/meta")
+    @app.api_route("/api/meta", methods=["GET", "HEAD"])
     def meta():
         idx = pipeline.idx
         with db.session() as ses:
@@ -118,7 +118,7 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
             "osm_date": idx.data.get("generated"),
         }
 
-    @app.get("/api/arretes")
+    @app.api_route("/api/arretes", methods=["GET", "HEAD"])
     def list_public(periode: Literal["actuels", "tous"] = "actuels"):
         today = _today(s)
         with db.session() as ses:
@@ -126,7 +126,7 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
             if periode == "actuels":
                 q = q.where(or_(Arrete.date_fin >= today.isoformat(), Arrete.date_fin.is_(None)))
             rows = ses.scalars(q.order_by(Arrete.date_debut)).all()
-        return JSONResponse([public_view(r, today) for r in rows], headers={"Cache-Control": "public, max-age=300"})
+        return JSONResponse([public_view(r, today) for r in rows], headers={"Cache-Control": "public, max-age=60"})
 
     # ------------------------------------------------------------------ administration
     def require_admin(request: Request):
@@ -213,7 +213,9 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
                 r.statut = data["statut"]
                 if r.statut == "publie":
                     r.motif_verification = ""
-            if content_change:
+            if content_change or "statut" in data:
+                # Toute décision de l'administrateur (y compris masquer/publier) prime sur les
+                # retraitements automatiques ultérieurs (reprise de géocodage, `cli reprocess`).
                 r.modifie_manuellement = True
             if r.date_debut and r.date_fin and r.date_fin < r.date_debut:
                 raise HTTPException(422, "La date de fin précède la date de début")
