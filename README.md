@@ -87,13 +87,13 @@ Liste accessible au clavier et aux lecteurs d'écran, équivalente à la carte ;
 de filtre `aria-pressed` ; compteur de résultats annoncé (`aria-live`) ; contrastes AA ; focus visible ;
 respect de `prefers-reduced-motion`. Un audit RGAA reste nécessaire pour déclarer un taux de conformité.
 
-## Déploiement sur map.utagawavtt.com/ATCorbas
+## Déploiement sur maps.utagawavtt.com/ATCorbas
 
 Prérequis : Docker + Docker Compose, nginx avec HTTPS (déjà en place).
 
 ```bash
-git clone https://github.com/utagawal/Corbas-CarteAT.git /opt/carteat && cd /opt/carteat
-cp .env.example .env
+git clone https://github.com/utagawal/Corbas-CarteAT.git /var/data/carteat-corbas && cd /var/data/carteat-corbas
+cp .env.example .env && chmod 600 .env
 # 1. clé de session
 sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -base64 48 | tr -d '\n/+=')|" .env
 # 2. mot de passe administrateur (la commande affiche la ligne à coller dans .env)
@@ -104,18 +104,26 @@ docker compose up -d
 docker compose logs -f   # le premier import (OCR des arrêtés 2026) prend ~15-20 min
 ```
 
-nginx : inclure [`deploy/nginx-ATCorbas.conf`](deploy/nginx-ATCorbas.conf) dans le bloc `server` HTTPS de
-`map.utagawavtt.com`, puis `sudo nginx -t && sudo systemctl reload nginx`.
+nginx : copier [`deploy/nginx-ATCorbas.conf`](deploy/nginx-ATCorbas.conf) dans `/etc/nginx/snippets/ATCorbas.conf`,
+ajouter `include /etc/nginx/snippets/ATCorbas.conf;` dans le bloc `server` HTTPS de `maps.utagawavtt.com`
+(avant `location / {`), puis `sudo nginx -t && sudo systemctl reload nginx`. Le snippet utilise
+`location ^~` (prioritaire sur les locations regex des tuiles) et `more_set_headers` (module headers-more).
 
-- Carte publique : https://map.utagawavtt.com/ATCorbas/
-- Administration : https://map.utagawavtt.com/ATCorbas/admin.html
+Le dossier du code ne doit pas porter le nom du chemin public (`/var/data/ATCorbas` serait sous le
+`root /var/data/` de nginx) : d'où `/var/data/carteat-corbas`, et `.env` en `chmod 600`.
 
-Mise à jour : `git pull && docker compose up -d --build`.
+Derrière Cloudflare : ne pas activer *Rocket Loader* ni *Email obfuscation* sur `/ATCorbas/*`
+(scripts injectés bloqués par la politique de sécurité du site).
+
+- Carte publique : https://maps.utagawavtt.com/ATCorbas/
+- Administration : https://maps.utagawavtt.com/ATCorbas/admin.html
+
+Mise à jour : `cd /var/data/carteat-corbas && git pull && docker compose up -d --build`.
 
 ### Intégration sur corbas.fr
 
 ```html
-<iframe src="https://map.utagawavtt.com/ATCorbas/?embed=1"
+<iframe src="https://maps.utagawavtt.com/ATCorbas/?embed=1"
         title="Carte des travaux et événements sur la voie publique à Corbas"
         style="width:100%;height:80vh;border:0" loading="lazy" allow="geolocation"></iframe>
 ```
