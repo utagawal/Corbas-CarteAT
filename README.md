@@ -120,6 +120,24 @@ Derrière Cloudflare : ne pas activer *Rocket Loader* ni *Email obfuscation* sur
 
 Mise à jour : `cd /var/data/carteat-corbas && git pull && docker compose up -d --build`.
 
+### Déploiement automatique
+
+[`deploy/deploy.sh`](deploy/deploy.sh) récupère `main`, reconstruit l'image, redémarre le conteneur,
+vérifie que l'application répond (sinon **retour automatique à la version précédente**), puis met à jour
+le snippet nginx s'il a changé (testé par `nginx -t` avant rechargement). Sans nouveauté sur `main`, il ne
+fait rien. Journal : `/var/log/carteat-deploy.log`.
+
+| Action | Commande |
+|---|---|
+| Déployer maintenant | `sudo /var/data/carteat-corbas/deploy/deploy.sh` |
+| Voir s'il y a une mise à jour | `sudo /var/data/carteat-corbas/deploy/deploy.sh --check` |
+| Redéployer + recalculer les arrêtés | `sudo /var/data/carteat-corbas/deploy/deploy.sh --force --reprocess` |
+| Déploiement automatique (toutes les 15 min) | `echo '*/15 * * * * root /var/data/carteat-corbas/deploy/deploy.sh >/dev/null 2>&1' \| sudo tee /etc/cron.d/carteat-deploy` |
+| Suivre le journal | `sudo tail -f /var/log/carteat-deploy.log` |
+
+Une version qui a échoué n'est pas retentée par le cron (relancer avec `--force` après correction).
+Le déploiement est refusé si le dossier contient des modifications locales non committées.
+
 ### Intégration sur corbas.fr
 
 ```html
