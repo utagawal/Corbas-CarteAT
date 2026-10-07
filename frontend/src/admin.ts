@@ -180,6 +180,14 @@ function renderEditor(a: AdminArrete) {
 
   const titre = h('input', { id: 'e-titre', type: 'text', value: a.titre });
   const cat = h('select', { id: 'e-cat' }, ...Object.entries(CATEGORIES).map(([k, c]) => h('option', { value: k, selected: k === a.categorie }, c.label)));
+  cat.addEventListener('change', () => {
+    const c = CATEGORIES[cat.value as Categorie] ?? CATEGORIES.autre;
+    const el = iconMarker?.getElement();
+    if (el) {
+      el.style.setProperty('--cat', c.couleur);
+      el.replaceChildren(icon(c.icone, 16));
+    }
+  });
   const imp = h('fieldset', { class: 'checks' }, h('legend', {}, 'Conséquences'),
     ...IMPACT_ORDER.map((k) => h('label', {}, h('input', { type: 'checkbox', value: k, checked: a.impacts.includes(k) }), ' ', IMPACTS[k].label)));
   const deb = h('input', { id: 'e-deb', type: 'date', value: a.date_debut ?? '' });
@@ -471,18 +479,21 @@ function setupMap(div: HTMLElement) {
       const p = e.features[0].properties as { fi: number; p: string };
       drag = { fi: Number(p.fi), path: JSON.parse(p.p) as number[] };
       m.getCanvas().style.cursor = 'grabbing';
+      // Le bouton peut être relâché hors de la carte : on écoute aussi la fenêtre.
+      window.addEventListener('mouseup', endDrag, { once: true });
+      window.addEventListener('touchend', endDrag, { once: true });
     };
     const moveDrag = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
       if (!drag) return;
       setVertex(features[drag.fi].geometry, drag.path, [+e.lngLat.lng.toFixed(6), +e.lngLat.lat.toFixed(6)]);
       redraw();
     };
-    const endDrag = () => {
+    function endDrag() {
       if (!drag) return;
       drag = null;
       m.getCanvas().style.cursor = '';
       touchFeatures();
-    };
+    }
     m.on('mousedown', 'e-handle', startDrag);
     m.on('touchstart', 'e-handle', startDrag);
     m.on('mousemove', moveDrag);
@@ -510,16 +521,20 @@ function setupMap(div: HTMLElement) {
           return;
         }
         const a = tronconA;
+        const editeId = current?.id;
         tronconA = null;
         $('tool-hint').textContent = HINTS.troncon;
         api<{ rue: string; longueur_m: number; feature: GeoJSON.Feature }>('api/admin/troncon', {
           method: 'POST', body: JSON.stringify({ a, b: c }),
         }).then((r) => {
+          // Réponse arrivée après l'ouverture d'un autre arrêté (ou d'une autre carte) : on l'ignore.
+          if (current?.id !== editeId || emap !== m) return;
           features.push(r.feature);
           touchFeatures();
           redraw();
           toast(`${r.rue} : ${r.longueur_m} m ajoutés. Pensez à enregistrer.`);
         }).catch((err) => {
+          if (current?.id !== editeId || emap !== m) return;
           redraw();
           toast((err as Error).message, true);
         });
