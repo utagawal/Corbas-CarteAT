@@ -132,3 +132,10 @@ def test_entre_carrefour_et_numero(idx):
     # le texte « Lieu » produit est ré-exploitable tel quel par la localisation de l'administration
     from carteat.parser import extract_locations
     assert extract_locations(ex.lieu_texte, idx)[0] == ex.localisations
+
+
+def test_lieu_dit_utilise_le_contour_osm(idx):
+    # « Parc de Loisirs » (texte des arrêtés) → objet OSM « Parc de Loisirs de Corbas » (leisure=park)
+    g = idx.lieux["Parc de Loisirs"]
+    osm_geom = next(geom for _, name, geom in idx.places if name == "Parc de Loisirs de Corbas")
+    assert g.equals(osm_geom) and g.area > 50_000

@@ -61,15 +61,16 @@ Les noms de voies sont reconnus même avec des erreurs d'OCR ou des variantes (�
 
 ### Lieux-dits
 
-Certains lieux cités dans les arrêtés n'ont pas de nom dans OpenStreetMap (ex. le **Parc de Loisirs**, dont
-seuls l'arrêt de bus et le panneau portent le nom). Ils sont décrits dans
-[`backend/carteat/data/lieux.json`](backend/carteat/data/lieux.json) : nom, alias et géométrie GeoJSON.
+Les arrêtés désignent parfois un lieu sous un nom différent de celui d'OpenStreetMap (« Parc de Loisirs »
+↔ OSM « Parc de Loisirs de Corbas »), ou un lieu absent d'OSM. Ces correspondances sont décrites dans
+[`backend/carteat/data/lieux.json`](backend/carteat/data/lieux.json) : nom, alias, `osm_nom` (objet OSM
+dont la géométrie est utilisée en priorité) et une géométrie GeoJSON de secours.
 Un fichier `lieux.json` de même format placé dans le volume de données (`/data/lieux.json`) complète ou
 remplace ces entrées sans reconstruire l'image (redémarrer le conteneur, puis
 `python -m carteat.cli reprocess`).
 
-Le plus durable reste de nommer l'objet dans OpenStreetMap (par ex. un contour `leisure=park` +
-`name=Parc de Loisirs`) : il sera repris au rafraîchissement mensuel du référentiel.
+Le plus durable reste de nommer l'objet dans OpenStreetMap : il est repris au rafraîchissement mensuel
+du référentiel (`python -m carteat.cli refresh-osm` pour l'avoir tout de suite).
 
 ### Données personnelles (RGPD)
 

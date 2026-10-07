@@ -107,8 +107,12 @@ class StreetIndex:
                 self.places.append((_num_norm(p["name"]), p["name"], self.proj.fwd(shape(p["geometry"]))))
         # Lieux-dits du référentiel local (prioritaires sur les rues entières, cf. parser).
         self.lieux: dict[str, BaseGeometry] = {}
+        osm_by_name = {name: geom for _, name, geom in self.places}
         for l in lieux or []:
-            g = self.proj.fwd(shape(l["geometry"]))
+            # La géométrie OSM (si l'objet y est nommé) prime sur la géométrie de secours du fichier.
+            g = osm_by_name.get(l.get("osm_nom", ""))
+            if g is None:
+                g = self.proj.fwd(shape(l["geometry"]))
             self.lieux[l["nom"]] = g
             for n in [l["nom"], *l.get("alias", [])]:
                 self.places.insert(0, (_num_norm(n), l["nom"], g))
