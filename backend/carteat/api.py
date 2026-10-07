@@ -95,11 +95,11 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
                        same_site="strict", https_only=s.cookie_secure)
 
     # ------------------------------------------------------------------ public
-    @app.get("/healthz")
+    @app.api_route("/healthz", methods=["GET", "HEAD"])
     def healthz():
         return {"ok": True}
 
-    @app.get("/api/meta")
+    @app.api_route("/api/meta", methods=["GET", "HEAD"])
     def meta():
         idx = pipeline.idx
         with db.session() as ses:
@@ -118,7 +118,7 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
             "osm_date": idx.data.get("generated"),
         }
 
-    @app.get("/api/arretes")
+    @app.api_route("/api/arretes", methods=["GET", "HEAD"])
     def list_public(periode: Literal["actuels", "tous"] = "actuels"):
         today = _today(s)
         with db.session() as ses:

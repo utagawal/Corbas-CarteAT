@@ -82,3 +82,8 @@ def test_password_hash_roundtrip():
     hsh = hash_password("un mot de passe solide")
     assert verify_password("un mot de passe solide", hsh)
     assert not verify_password("autre", hsh)
+
+
+def test_head_sur_api_publique(client):
+    assert client.head("/api/arretes").status_code == 200
+    assert client.head("/healthz").status_code == 200
