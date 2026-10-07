@@ -95,3 +95,38 @@ def test_statut_seul_fige_l_arrete(client):
     r = client.put("/api/admin/arretes/a1", json={"statut": "masque"}, headers=h)
     assert r.json()["modifie_manuellement"] is True
     assert [a["id"] for a in client.get("/api/arretes").json()] == []
+
+
+def _login(client):
+    h = {"X-Requested-With": "carteat"}
+    client.post("/api/admin/login", json={"password": "motdepasse-test-123"}, headers=h)
+    return h
+
+
+def test_troncon_suit_la_rue(client):
+    from carteat import osm
+    h = _login(client)
+    centrale = next(w["coords"] for w in osm.load(osm.SEED_PATH)["ways"] if w["name"] == "Rue Centrale" and len(w["coords"]) > 5)
+    a, b = centrale[0], centrale[-1]
+    r = client.post("/api/admin/troncon", json={"a": a, "b": b}, headers=h)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["rue"] == "Rue Centrale" and d["longueur_m"] > 20
+    assert d["feature"]["geometry"]["type"] == "LineString"
+    # deux points éloignés de toute voie commune
+    r = client.post("/api/admin/troncon", json={"a": [4.80, 45.60], "b": [4.81, 45.61]}, headers=h)
+    assert r.status_code == 422
+
+
+def test_position_icone_manuelle(client):
+    h = _login(client)
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {}, "geometry": {"type": "LineString", "coordinates": [[4.90, 45.67], [4.91, 45.67]]}}]}
+    # tracé + icône déplacée : la position choisie est conservée
+    r = client.put("/api/admin/arretes/a1", json={"geojson": fc, "centre": [4.9012345678, 45.6712]}, headers=h)
+    assert r.json()["centre"] == [4.901235, 45.6712]
+    # icône remise à null : recalculée sur le tracé
+    r = client.put("/api/admin/arretes/a1", json={"centre": None}, headers=h)
+    lon, lat = r.json()["centre"]
+    assert 4.90 <= lon <= 4.91 and abs(lat - 45.67) < 1e-6
+    assert client.put("/api/admin/arretes/a1", json={"centre": [500, 45]}, headers=h).status_code == 422

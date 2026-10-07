@@ -1,6 +1,6 @@
 import './styles.css';
 import './admin.css';
-import { Check, Eraser, FileText, MapPin, MousePointerClick, RefreshCw, Spline, Trash2, Undo2, X } from 'lucide';
+import { Check, Crosshair, Eraser, FileText, Move, MapPin, MousePointerClick, RefreshCw, Route, Spline, Trash2, Undo2, X } from 'lucide';
 import { type Arrete, type Categorie, type Impact, type Meta, CATEGORIES, IMPACTS, IMPACT_ORDER, api, h, icon } from './common';
 import { boundsOf, createMap, maplibregl } from './mapbase';
 
@@ -130,15 +130,37 @@ $('admin-q').addEventListener('input', renderTable);
 let emap: maplibregl.Map | null = null;
 let features: GeoJSON.Feature[] = [];
 let draft: [number, number][] = [];
-let mode: 'none' | 'line' | 'point' | 'delete' = 'none';
+type Mode = 'none' | 'troncon' | 'line' | 'point' | 'edit' | 'delete';
+let mode: Mode = 'none';
+let featuresDirty = false; // tracé modifié depuis l'ouverture
+let centre: [number, number] | null = null; // position de l'icône
+let centreAction: 'aucune' | 'deplacee' | 'recalculer' = 'aucune';
+let iconMarker: maplibregl.Marker | null = null;
+let tronconA: [number, number] | null = null;
+let drag: { fi: number; path: number[] } | null = null;
 
 async function openEditor(id: string) {
   current = await api<AdminArrete>(`api/admin/arretes/${encodeURIComponent(id)}`);
-  features = structuredClone(current.geojson.features ?? []);
-  draft = [];
-  mode = 'none';
+  resetEditState(current);
   renderEditor(current);
   renderTable();
+}
+
+function resetEditState(a: AdminArrete) {
+  features = structuredClone(a.geojson.features ?? []);
+  draft = [];
+  mode = 'none';
+  featuresDirty = false;
+  centre = a.centre;
+  centreAction = 'aucune';
+  tronconA = null;
+  drag = null;
+}
+
+function touchFeatures() {
+  featuresDirty = true;
+  // Tant que l'icône n'a pas été placée à la main, elle suit le tracé.
+  if (centreAction !== 'deplacee') placeIcon(autoCentre());
 }
 
 function field(label: string, input: HTMLElement, hint?: string) {
@@ -177,6 +199,7 @@ function renderEditor(a: AdminArrete) {
     });
     if (!r.geojson.features.length) return toast('Aucun lieu reconnu dans ce texte (indiquez le type de voie : « 12 rue Centrale », « Rue X entre la rue Y et la rue Z »…).', true);
     features = [...features.filter((f) => f.properties?.role === 'deviation'), ...r.geojson.features];
+    touchFeatures();
     redraw(true);
     toast(`Tracé recalculé (qualité : ${r.quality}). Pensez à enregistrer.`);
   });
@@ -193,10 +216,14 @@ function renderEditor(a: AdminArrete) {
       intervenant: inter.value,
       note: note.value,
       statut: publish ? 'publie' : (statut.querySelector<HTMLInputElement>('input:checked')?.value ?? a.statut),
-      geojson: { type: 'FeatureCollection', features },
     };
+    // Le tracé n'est envoyé que s'il a changé (sinon l'icône garderait sa position actuelle).
+    if (featuresDirty) body.geojson = { type: 'FeatureCollection', features };
+    if (centreAction === 'deplacee' && centre) body.centre = centre;
+    else if (centreAction === 'recalculer') body.centre = null;
     try {
       current = await api<AdminArrete>(`api/admin/arretes/${encodeURIComponent(a.id)}`, { method: 'PUT', body: JSON.stringify(body) });
+      resetEditState(current);
       toast('Enregistré.');
       await loadList();
       renderEditor(current);
@@ -212,14 +239,14 @@ function renderEditor(a: AdminArrete) {
   bRe.addEventListener('click', async () => {
     if (!confirm('Les modifications manuelles de cet arrêté seront remplacées par le résultat automatique. Continuer ?')) return;
     current = await api<AdminArrete>(`api/admin/arretes/${encodeURIComponent(a.id)}/retraiter`, { method: 'POST', body: '{}' });
-    features = structuredClone(current.geojson.features ?? []);
+    resetEditState(current);
     await loadList();
     renderEditor(current);
     toast('Extraction relancée.');
   });
 
   // Outils de dessin
-  const tool = (m: typeof mode, ic: Parameters<typeof icon>[0], label: string) => {
+  const tool = (m: Mode, ic: Parameters<typeof icon>[0], label: string) => {
     const b = h('button', { type: 'button', class: 'tool', 'aria-pressed': String(mode === m), 'data-mode': m }, icon(ic, 16), label);
     b.addEventListener('click', () => setMode(mode === m ? 'none' : m));
     return b;
@@ -228,7 +255,8 @@ function renderEditor(a: AdminArrete) {
   finish.addEventListener('click', finishLine);
   const undo = h('button', { type: 'button', class: 'tool' }, icon(Undo2, 16), 'Annuler le dernier point');
   undo.addEventListener('click', () => {
-    draft.pop();
+    if (tronconA) tronconA = null;
+    else draft.pop();
     redraw();
   });
   const clear = h('button', { type: 'button', class: 'tool danger' }, icon(Eraser, 16), 'Tout effacer');
@@ -236,7 +264,15 @@ function renderEditor(a: AdminArrete) {
     if (!confirm('Effacer tous les tracés de cet arrêté ?')) return;
     features = [];
     draft = [];
+    tronconA = null;
+    touchFeatures();
     redraw();
+  });
+  const recentrer = h('button', { type: 'button', class: 'tool' }, icon(Crosshair, 16), 'Recentrer l’icône');
+  recentrer.addEventListener('click', () => {
+    centreAction = 'recalculer';
+    placeIcon(autoCentre());
+    toast('L’icône sera replacée automatiquement sur le tracé à l’enregistrement.');
   });
 
   const mapDiv = h('div', { class: 'emap', id: 'emap' });
@@ -271,9 +307,10 @@ function renderEditor(a: AdminArrete) {
       ),
       h('div', { class: 'ed-map' },
         h('div', { class: 'tools', role: 'toolbar', 'aria-label': 'Outils de tracé' },
-          tool('line', Spline, 'Tracer une ligne'), tool('point', MousePointerClick, 'Placer un point'),
-          tool('delete', Trash2, 'Supprimer un tracé'), finish, undo, clear),
-        h('p', { class: 'hint', id: 'tool-hint' }, 'Choisissez un outil. Ligne : cliquez chaque point puis « Terminer » (ou double-clic).'),
+          tool('troncon', Route, 'Tronçon de rue'), tool('line', Spline, 'Ligne libre'),
+          tool('point', MousePointerClick, 'Point'), tool('edit', Move, 'Modifier les points'),
+          tool('delete', Trash2, 'Supprimer un tracé'), finish, undo, recentrer, clear),
+        h('p', { class: 'hint', id: 'tool-hint' }, HINTS.none),
         mapDiv,
       ),
     ),
@@ -283,32 +320,117 @@ function renderEditor(a: AdminArrete) {
   ed.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function setMode(m: typeof mode) {
+const HINTS: Record<Mode, string> = {
+  none: 'Choisissez un outil. L’icône se déplace en la faisant glisser.',
+  troncon: 'Cliquez le début puis la fin du tronçon sur la même rue : le tracé suit la voie.',
+  line: 'Cliquez chaque point, puis « Terminer la ligne » ou double-cliquez.',
+  point: 'Cliquez sur la carte pour placer un point.',
+  edit: 'Faites glisser un point blanc pour le déplacer ; double-cliquez dessus pour le supprimer.',
+  delete: 'Cliquez sur un tracé pour le supprimer.',
+};
+
+function setMode(m: Mode) {
   if (mode === 'line' && m !== 'line') finishLine();
+  tronconA = null;
   mode = m;
   document.querySelectorAll<HTMLButtonElement>('.tool[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
-  const hints = {
-    none: 'Choisissez un outil.',
-    line: 'Cliquez sur la carte pour ajouter des points, puis « Terminer la ligne » ou double-cliquez.',
-    point: 'Cliquez sur la carte pour placer un point.',
-    delete: 'Cliquez sur un tracé pour le supprimer.',
-  };
-  $('tool-hint').textContent = hints[m];
+  $('tool-hint').textContent = HINTS[m];
   if (emap) {
-    emap.getCanvas().style.cursor = m === 'none' ? '' : 'crosshair';
-    if (m === 'line') emap.doubleClickZoom.disable();
+    emap.getCanvas().style.cursor = m === 'none' || m === 'edit' ? '' : 'crosshair';
+    if (m === 'line' || m === 'edit') emap.doubleClickZoom.disable();
     else emap.doubleClickZoom.enable();
   }
+  redraw();
 }
 
 function finishLine() {
-  if (draft.length >= 2) features.push({ type: 'Feature', properties: { role: 'impact' }, geometry: { type: 'LineString', coordinates: draft } });
+  if (draft.length >= 2) {
+    features.push({ type: 'Feature', properties: { role: 'impact' }, geometry: { type: 'LineString', coordinates: draft } });
+    touchFeatures();
+  }
   draft = [];
   redraw();
 }
 
+// ------------------------------------------------------------------------- icône
+function autoCentre(): [number, number] | null {
+  const impacts = features.filter((f) => f.properties?.role !== 'deviation');
+  const b = boundsOf({ type: 'FeatureCollection', features: impacts.length ? impacts : features });
+  if (!b) return null;
+  const c = b.getCenter();
+  return [+c.lng.toFixed(6), +c.lat.toFixed(6)];
+}
+
+function placeIcon(c: [number, number] | null) {
+  if (!iconMarker) return;
+  if (c) iconMarker.setLngLat(c).addTo(emap!);
+  else iconMarker.remove();
+}
+
+function createIconMarker(a: AdminArrete) {
+  const cat = CATEGORIES[a.categorie] ?? CATEGORIES.autre;
+  const el = h('div', { class: 'marker admin-marker', title: 'Icône : faites-la glisser pour la déplacer' }, icon(cat.icone, 16));
+  el.style.setProperty('--cat', cat.couleur);
+  iconMarker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'center' });
+  iconMarker.on('dragend', () => {
+    const p = iconMarker!.getLngLat();
+    centre = [+p.lng.toFixed(6), +p.lat.toFixed(6)];
+    centreAction = 'deplacee';
+    toast('Nouvelle position de l’icône : pensez à enregistrer.');
+  });
+  placeIcon(centre ?? autoCentre());
+}
+
+// ------------------------------------------------------------------------- retouche des points
+type Pos = number[];
+/** Sommets modifiables d'une géométrie, avec leur chemin d'accès dans `coordinates`. */
+function vertices(g: GeoJSON.Geometry): { path: number[]; c: Pos }[] {
+  switch (g.type) {
+    case 'Point':
+      return [{ path: [], c: g.coordinates }];
+    case 'LineString':
+      return g.coordinates.map((c, i) => ({ path: [i], c }));
+    case 'MultiLineString':
+      return g.coordinates.flatMap((l, j) => l.map((c, i) => ({ path: [j, i], c })));
+    case 'Polygon':
+      // le dernier point d'un anneau répète le premier : on ne l'expose pas
+      return g.coordinates.flatMap((r, j) => r.slice(0, -1).map((c, i) => ({ path: [j, i], c })));
+    default:
+      return [];
+  }
+}
+
+function setVertex(g: GeoJSON.Geometry, path: number[], c: Pos) {
+  if (g.type === 'Point') g.coordinates = c;
+  else if (g.type === 'LineString') g.coordinates[path[0]] = c;
+  else if (g.type === 'MultiLineString') g.coordinates[path[0]][path[1]] = c;
+  else if (g.type === 'Polygon') {
+    const ring = g.coordinates[path[0]];
+    ring[path[1]] = c;
+    if (path[1] === 0) ring[ring.length - 1] = c;
+  }
+}
+
+function deleteVertex(fi: number, path: number[]): boolean {
+  const g = features[fi].geometry;
+  if (g.type === 'LineString' && g.coordinates.length > 2) g.coordinates.splice(path[0], 1);
+  else if (g.type === 'MultiLineString' && g.coordinates[path[0]].length > 2) g.coordinates[path[0]].splice(path[1], 1);
+  else if (g.type === 'Polygon' && g.coordinates[path[0]].length > 4) {
+    const ring = g.coordinates[path[0]];
+    ring.splice(path[1], 1);
+    ring[ring.length - 1] = ring[0];
+  } else return false;
+  return true;
+}
+
+
 function editData(): GeoJSON.FeatureCollection {
   const fs: GeoJSON.Feature[] = features.map((f, i) => ({ ...f, properties: { ...(f.properties ?? {}), i } }));
+  if (mode === 'edit') {
+    features.forEach((f, fi) => vertices(f.geometry).forEach((v) =>
+      fs.push({ type: 'Feature', properties: { role: 'handle', fi, p: JSON.stringify(v.path) }, geometry: { type: 'Point', coordinates: v.c } })));
+  }
+  if (tronconA) fs.push({ type: 'Feature', properties: { role: 'vertex', i: -1 }, geometry: { type: 'Point', coordinates: tronconA } });
   if (draft.length) {
     fs.push({ type: 'Feature', properties: { role: 'draft', i: -1 }, geometry: { type: 'LineString', coordinates: draft.length > 1 ? draft : [draft[0], draft[0]] } });
     draft.forEach((c) => fs.push({ type: 'Feature', properties: { role: 'vertex', i: -1 }, geometry: { type: 'Point', coordinates: c } }));
@@ -337,21 +459,84 @@ function setupMap(div: HTMLElement) {
     m.addLayer({ id: 'e-line', type: 'line', source: 'edit', filter: ['all', role('impact'), ['in', ['geometry-type'], ['literal', ['LineString', 'MultiLineString']]]], layout: { 'line-cap': 'round' }, paint: { 'line-color': '#d62828', 'line-width': 7, 'line-opacity': 0.85 } });
     m.addLayer({ id: 'e-point', type: 'circle', source: 'edit', filter: ['all', role('impact'), ['==', ['geometry-type'], 'Point']], paint: { 'circle-radius': 8, 'circle-color': '#d62828', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
     m.addLayer({ id: 'e-draft', type: 'line', source: 'edit', filter: role('draft'), paint: { 'line-color': '#e76f00', 'line-width': 4, 'line-dasharray': [2, 1] } });
-    m.addLayer({ id: 'e-vertex', type: 'circle', source: 'edit', filter: role('vertex'), paint: { 'circle-radius': 5, 'circle-color': '#fff', 'circle-stroke-color': '#e76f00', 'circle-stroke-width': 2 } });
+    m.addLayer({ id: 'e-vertex', type: 'circle', source: 'edit', filter: role('vertex'), paint: { 'circle-radius': 6, 'circle-color': '#fff', 'circle-stroke-color': '#e76f00', 'circle-stroke-width': 3 } });
+    m.addLayer({ id: 'e-handle', type: 'circle', source: 'edit', filter: role('handle'), paint: { 'circle-radius': 6, 'circle-color': '#fff', 'circle-stroke-color': '#005b94', 'circle-stroke-width': 2.5 } });
+    createIconMarker(current!);
     redraw(true);
+
+    // Glisser-déposer des points (souris et tactile)
+    const startDrag = (e: maplibregl.MapLayerMouseEvent | maplibregl.MapLayerTouchEvent) => {
+      if (mode !== 'edit' || !e.features?.length) return;
+      e.preventDefault();
+      const p = e.features[0].properties as { fi: number; p: string };
+      drag = { fi: Number(p.fi), path: JSON.parse(p.p) as number[] };
+      m.getCanvas().style.cursor = 'grabbing';
+    };
+    const moveDrag = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
+      if (!drag) return;
+      setVertex(features[drag.fi].geometry, drag.path, [+e.lngLat.lng.toFixed(6), +e.lngLat.lat.toFixed(6)]);
+      redraw();
+    };
+    const endDrag = () => {
+      if (!drag) return;
+      drag = null;
+      m.getCanvas().style.cursor = '';
+      touchFeatures();
+    };
+    m.on('mousedown', 'e-handle', startDrag);
+    m.on('touchstart', 'e-handle', startDrag);
+    m.on('mousemove', moveDrag);
+    m.on('touchmove', moveDrag);
+    m.on('mouseup', endDrag);
+    m.on('touchend', endDrag);
+    m.on('mouseenter', 'e-handle', () => { if (mode === 'edit') m.getCanvas().style.cursor = 'grab'; });
+    m.on('mouseleave', 'e-handle', () => { if (mode === 'edit' && !drag) m.getCanvas().style.cursor = ''; });
+    m.on('dblclick', 'e-handle', (e) => {
+      if (mode !== 'edit' || !e.features?.length) return;
+      e.preventDefault();
+      const p = e.features[0].properties as { fi: number; p: string };
+      if (deleteVertex(Number(p.fi), JSON.parse(p.p))) {
+        touchFeatures();
+        redraw();
+      } else toast('Un tracé doit garder au moins deux points (utilisez « Supprimer un tracé »).', true);
+    });
     m.on('click', (e) => {
       const c: [number, number] = [+e.lngLat.lng.toFixed(6), +e.lngLat.lat.toFixed(6)];
-      if (mode === 'line') {
+      if (mode === 'troncon') {
+        if (!tronconA) {
+          tronconA = c;
+          $('tool-hint').textContent = 'Cliquez maintenant la fin du tronçon.';
+          redraw();
+          return;
+        }
+        const a = tronconA;
+        tronconA = null;
+        $('tool-hint').textContent = HINTS.troncon;
+        api<{ rue: string; longueur_m: number; feature: GeoJSON.Feature }>('api/admin/troncon', {
+          method: 'POST', body: JSON.stringify({ a, b: c }),
+        }).then((r) => {
+          features.push(r.feature);
+          touchFeatures();
+          redraw();
+          toast(`${r.rue} : ${r.longueur_m} m ajoutés. Pensez à enregistrer.`);
+        }).catch((err) => {
+          redraw();
+          toast((err as Error).message, true);
+        });
+        redraw();
+      } else if (mode === 'line') {
         draft.push(c);
         redraw();
       } else if (mode === 'point') {
         features.push({ type: 'Feature', properties: { role: 'impact' }, geometry: { type: 'Point', coordinates: c } });
+        touchFeatures();
         redraw();
       } else if (mode === 'delete') {
         const box: [maplibregl.PointLike, maplibregl.PointLike] = [[e.point.x - 6, e.point.y - 6], [e.point.x + 6, e.point.y + 6]];
         const hit = m.queryRenderedFeatures(box, { layers: ['e-line', 'e-point', 'e-fill', 'e-dev'] })[0];
         if (hit && typeof hit.properties?.i === 'number' && hit.properties.i >= 0) {
           features.splice(hit.properties.i, 1);
+          touchFeatures();
           redraw();
         }
       }

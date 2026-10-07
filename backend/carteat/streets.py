@@ -203,6 +203,15 @@ class StreetIndex:
             return [g]
         return [p for p in getattr(g, "geoms", []) if isinstance(p, LineString)]
 
+    def common_street(self, p1: Point, p2: Point, tol: float = 60.0) -> str | None:
+        """Voie la plus proche passant à moins de `tol` mètres des deux points (outil « tronçon »)."""
+        best = None
+        for name, g in self.geoms.items():
+            d1, d2 = g.distance(p1), g.distance(p2)
+            if d1 <= tol and d2 <= tol and (best is None or d1 + d2 < best[0]):
+                best = (d1 + d2, name)
+        return best[1] if best else None
+
     def segment_between(self, name: str, p1: Point, p2: Point) -> BaseGeometry | None:
         """Portion de la voie `name` entre deux points (projetés sur la voie)."""
         best = None

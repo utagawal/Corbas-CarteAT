@@ -69,3 +69,4 @@ textarea { resize: vertical; }
 .toast.is-error { background: #d70015; }
 @media (max-width: 1100px) { .board-body, .ed-grid { grid-template-columns: 1fr; } }
 @media (max-width: 899px) { .admin-actions .btn-small { padding: 0 10px; } .topbar-title p { display: none; } }
+.admin-marker { cursor: grab; } .admin-marker:active { cursor: grabbing; }
