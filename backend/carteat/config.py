@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     port: int = 8080
     data_dir: Path = Path("/data")
     static_dir: Path = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
-    public_url: str = ""  # ex. https://map.utagawavtt.com/ATCorbas/ (liens absolus, sitemap)
+    public_url: str = ""  # ex. https://maps.utagawavtt.com/ATCorbas/ (liens absolus, sitemap)
 
     # Registre PubliS²low
     registry_api: str = "https://publis2low.adullact.org/api/v1"
