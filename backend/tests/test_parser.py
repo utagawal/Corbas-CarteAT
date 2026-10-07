@@ -13,7 +13,7 @@ FIX = Path(__file__).parent / "fixtures"
 
 @pytest.fixture(scope="module")
 def idx():
-    return StreetIndex(osm.load(osm.SEED_PATH))
+    return StreetIndex(osm.load(osm.SEED_PATH), osm.load_lieux())
 
 
 def load(name: str) -> str:
@@ -113,3 +113,22 @@ def test_anonymisation():
     assert "Louis Blanc" not in s and "4 Rue Bernard Buffet" in s
     s = remove_postal_addresses("au droit du 53 Avenue de la Villerme - 69960 CORBAS, du vendredi")
     assert "53 Avenue de la Villerme" in s
+
+
+def test_lieu_dit_local(idx):
+    txt = ("Arrêté temporaire N°: 67/2026\nObjet : Stationnements réservés\n\nArticle 1 : Le mercredi 20 mai 2026, 22 places "
+           "de stationnement seront réservées sur la première rangée, parking des ombrières au Parc de Loisirs, de 9h30 à 13h.\n")
+    ex = parse(txt, idx, date(2026, 5, 1))
+    assert ex.localisations == [{"kind": "place", "name": "Parc de Loisirs"}]
+
+
+def test_entre_carrefour_et_numero(idx):
+    txt = ("Article 1 : Le samedi 25 avril 2026, la circulation sera interdite Route de Marennes, dans les deux sens, "
+           "entre le chemin des Bruyères et le 300 Route de Marennes.\n")
+    ex = parse(txt, idx, date(2026, 4, 1))
+    loc = ex.localisations[0]
+    assert loc["kind"] == "segment" and loc["street"] == "Route de Marennes"
+    assert loc["from"]["type"] == "intersection" and loc["to"] == {"type": "address", "num": "300", "street": "Route de Marennes"}
+    # le texte « Lieu » produit est ré-exploitable tel quel par la localisation de l'administration
+    from carteat.parser import extract_locations
+    assert extract_locations(ex.lieu_texte, idx)[0] == ex.localisations

@@ -53,7 +53,7 @@ class Pipeline:
     def idx(self) -> StreetIndex:
         if self._idx is None:
             path = self.s.osm_path if self.s.osm_path.exists() else osm.SEED_PATH
-            self._idx = StreetIndex(osm.load(path))
+            self._idx = StreetIndex(osm.load(path), osm.load_lieux(self.s.data_dir / "lieux.json"))
         return self._idx
 
     def geocoder(self) -> Geocoder:

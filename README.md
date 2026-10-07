@@ -53,8 +53,23 @@ localisation précise (adresse, carrefour, tronçon) ou rue entière expliciteme
 | « la circulation, Rue Clément Ader, sera interdite » | toute la rue (dans la commune) |
 | « L'itinéraire de déviation empruntera : … » | rues de déviation (pointillés) |
 
+| « parking des ombrières au Parc de Loisirs » | emprise du lieu-dit (référentiel local) |
+| « Route de Marennes, entre le chemin des Bruyères et le 300 Route de Marennes » | tronçon carrefour → adresse, suivi le long de la voie même si elle est découpée dans OSM |
+
 Les noms de voies sont reconnus même avec des erreurs d'OCR ou des variantes (« av. du 08 Mai 45 »,
 « rue Mirabeau » → « Rue Comte de Mirabeau »).
+
+### Lieux-dits
+
+Certains lieux cités dans les arrêtés n'ont pas de nom dans OpenStreetMap (ex. le **Parc de Loisirs**, dont
+seuls l'arrêt de bus et le panneau portent le nom). Ils sont décrits dans
+[`backend/carteat/data/lieux.json`](backend/carteat/data/lieux.json) : nom, alias et géométrie GeoJSON.
+Un fichier `lieux.json` de même format placé dans le volume de données (`/data/lieux.json`) complète ou
+remplace ces entrées sans reconstruire l'image (redémarrer le conteneur, puis
+`python -m carteat.cli reprocess`).
+
+Le plus durable reste de nommer l'objet dans OpenStreetMap (par ex. un contour `leisure=park` +
+`name=Parc de Loisirs`) : il sera repris au rafraîchissement mensuel du référentiel.
 
 ### Données personnelles (RGPD)
 

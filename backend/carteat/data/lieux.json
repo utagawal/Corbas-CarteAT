@@ -1,0 +1,56 @@
+{
+ "_commentaire": "Lieux-dits absents ou non nommés dans OpenStreetMap. Géométries GeoJSON en WGS84 (lon, lat). Un fichier lieux.json placé dans le dossier de données (/data) complète ou remplace ces entrées (même « nom »).",
+ "lieux": [
+  {
+   "nom": "Parc de Loisirs",
+   "alias": [
+    "Parc des Loisirs",
+    "Parc de Loisirs de Corbas"
+   ],
+   "source": "Emprise reconstituée à partir des aires de jeux, pistes BMX, terrains et pelouses OSM (le parc n'est pas nommé dans OSM)",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       4.907573,
+       45.652473
+      ],
+      [
+       4.904979,
+       45.654861
+      ],
+      [
+       4.905049,
+       45.654932
+      ],
+      [
+       4.906996,
+       45.654928
+      ],
+      [
+       4.910348,
+       45.654843
+      ],
+      [
+       4.910356,
+       45.654635
+      ],
+      [
+       4.909298,
+       45.653442
+      ],
+      [
+       4.90875,
+       45.653017
+      ],
+      [
+       4.907573,
+       45.652473
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

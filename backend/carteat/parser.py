@@ -209,6 +209,11 @@ def _anchor_regexes():
         "between": re.compile(
             rf"{ST}(?: (?!entre)[a-z0-9]+){{0,8}} entre {ART}{ST}(?: et| -)? {ART}{ST}"
         ),
+        # « Route de Marennes, entre le chemin des Bruyères et le 300 Route de Marennes » (et l'inverse)
+        "between_mixed": re.compile(
+            rf"{ST}(?: (?!entre)[a-z0-9]+){{0,8}} entre {ART}(?:{ST}(?: et| -)? (?:le |la |les )?(\d{{1,4}}) {ART}{ST}"
+            rf"|(\d{{1,4}}) {ART}{ST}(?: et| -)? {ART}{ST})"
+        ),
         "intersection": re.compile(
             rf"(?:intersection|croisement|angle|carrefour)(?: (?:de|du|des|d|entre))? {ART}{ST}(?: et| -)? {ART}{ST}"
         ),
@@ -251,6 +256,23 @@ def extract_locations(text: str, idx: StreetIndex) -> tuple[list[dict], list[str
         locs.append({"kind": "segment", "street": a,
                      "from": {"type": "intersection", "streets": [a, b]},
                      "to": {"type": "intersection", "streets": [a, c]}})
+        mark(m.start(), m.end())
+    for m in _RX["between_mixed"].finditer(s):
+        if not free(m.start(), m.end()):
+            continue
+        g = m.groups()
+        main = names[int(g[0])]
+        if g[1] is not None:  # carrefour puis numéro
+            cross, num, st = names[int(g[1])], g[2], names[int(g[3])]
+        else:  # numéro puis carrefour
+            num, st, cross = g[4], names[int(g[5])], names[int(g[6])]
+        if st != main or cross == main:
+            continue
+        inter = {"type": "intersection", "streets": [main, cross]}
+        addr = {"type": "address", "num": num, "street": main}
+        locs.append({"kind": "segment", "street": main,
+                     "from": inter if g[1] is not None else addr,
+                     "to": addr if g[1] is not None else inter})
         mark(m.start(), m.end())
     for m in _RX["intersection"].finditer(s):
         if not free(m.start(), m.end()):
@@ -384,9 +406,13 @@ def parse(text: str, idx: StreetIndex, ref_date: date | None = None) -> Extracti
         if o_locs:
             locs = o_locs
         cited = cited or o_cited
+    local = idx.find_places(norm(loc_text + " " + objet), local_only=True)
     if locs:
         uniq = {repr(sorted(l.items(), key=str)): l for l in locs}
         ex.localisations = list(uniq.values())
+    elif local:
+        # Un lieu-dit connu (« parking du Parc de Loisirs ») est plus précis qu'une rue entière.
+        ex.localisations = [{"kind": "place", "name": n} for n, _ in local[:3]]
     elif cited:
         ex.localisations = [{"kind": "street", "street": s} for s in cited]
     else:
@@ -427,6 +453,10 @@ def _lieu_texte(objet: str, locs: list[dict]) -> str | None:
                 o1 = [s for s in f["streets"] if s != l["street"]][0]
                 o2 = [s for s in t["streets"] if s != l["street"]][0]
                 parts.append(f"{l['street']}, entre {o1} et {o2}")
+            elif l.get("street") and {f["type"], t["type"]} == {"address", "intersection"}:
+                ad, it = (f, t) if f["type"] == "address" else (t, f)
+                cross = [x for x in it["streets"] if x != l["street"]][0]
+                parts.append(f"{l['street']}, entre {cross} et le {ad['num']} {l['street']}")
             else:
                 parts.append(f"de {a(f)} à {a(t)}")
     return " ; ".join(dict.fromkeys(parts)) or None

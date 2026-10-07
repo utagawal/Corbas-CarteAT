@@ -65,7 +65,7 @@ class Projector:
 
 
 class StreetIndex:
-    def __init__(self, data: dict):
+    def __init__(self, data: dict, lieux: list[dict] | None = None):
         self.data = data
         b = shape(data["boundary"]) if data.get("boundary") else None
         if b is not None:
@@ -105,6 +105,13 @@ class StreetIndex:
         for p in data.get("places", []):
             if p.get("name"):
                 self.places.append((_num_norm(p["name"]), p["name"], self.proj.fwd(shape(p["geometry"]))))
+        # Lieux-dits du référentiel local (prioritaires sur les rues entières, cf. parser).
+        self.lieux: dict[str, BaseGeometry] = {}
+        for l in lieux or []:
+            g = self.proj.fwd(shape(l["geometry"]))
+            self.lieux[l["nom"]] = g
+            for n in [l["nom"], *l.get("alias", [])]:
+                self.places.insert(0, (_num_norm(n), l["nom"], g))
 
     # ------------------------------------------------------------------ recherche de noms
     def find_streets(self, tokens: list[str]) -> list[StreetMatch]:
@@ -152,12 +159,15 @@ class StreetIndex:
             return [STREET_TYPES[toks[0]]] + toks[1:]
         return toks
 
-    def find_places(self, text_norm: str) -> list[tuple[str, BaseGeometry]]:
-        out = []
+    def find_places(self, text_norm: str, local_only: bool = False) -> list[tuple[str, BaseGeometry]]:
+        out: dict[str, BaseGeometry] = {}
+        text_norm = re.sub(r"\b0+(\d)", r"\1", text_norm)
         for key, name, geom in self.places:
-            if len(key) >= 6 and re.search(rf"\b{re.escape(key)}\b", text_norm):
-                out.append((name, geom))
-        return out
+            if local_only and name not in self.lieux:
+                continue
+            if name not in out and len(key) >= 6 and re.search(rf"\b{re.escape(key)}\b", text_norm):
+                out[name] = geom
+        return list(out.items())
 
     # ------------------------------------------------------------------ géométrie
     def geom(self, name: str) -> BaseGeometry:
@@ -196,15 +206,75 @@ class StreetIndex:
             d = part.distance(p1) + part.distance(p2)
             if best is None or d < best[0]:
                 best = (d, part)
-        if best is None or best[0] > 120:
+        if best is not None and best[0] <= 120:
+            part = best[1]
+            a, b = part.project(p1), part.project(p2)
+            if a > b:
+                a, b = b, a
+            if b - a < 10:
+                return self.segment_around(name, p1)
+            return substring(part, a, b)
+        # Voie découpée en plusieurs morceaux (giratoires, chaussées séparées) : chemin le long de la voie.
+        return self._path_along(name, p1, p2)
+
+    def _path_along(self, name: str, p1: Point, p2: Point, snap: float = 25.0) -> BaseGeometry | None:
+        parts = self._parts(name)
+        if not parts or min(pt.distance(self.geoms[name]) for pt in (p1, p2)) > 120:
             return None
-        part = best[1]
-        a, b = part.project(p1), part.project(p2)
-        if a > b:
-            a, b = b, a
-        if b - a < 10:
+        coords: list[tuple[float, float]] = []
+        index: dict[tuple[float, float], int] = {}
+        adj: dict[int, list[tuple[int, float]]] = {}
+
+        def node(c) -> int:
+            k = (round(c[0], 1), round(c[1], 1))
+            if k not in index:
+                index[k] = len(coords)
+                coords.append(k)
+                adj[index[k]] = []
+            return index[k]
+
+        def link(i: int, j: int) -> None:
+            if i != j:
+                d = math.dist(coords[i], coords[j])
+                adj[i].append((j, d))
+                adj[j].append((i, d))
+
+        ends = []
+        for part in parts:
+            cs = list(part.coords)
+            ids = [node(c) for c in cs]
+            for i, j in zip(ids, ids[1:]):
+                link(i, j)
+            ends += [ids[0], ids[-1]]
+        # raccorde les extrémités proches (morceaux non jointifs)
+        for i in ends:
+            for j in ends:
+                if i < j and math.dist(coords[i], coords[j]) <= snap:
+                    link(i, j)
+        src = min(range(len(coords)), key=lambda i: math.dist(coords[i], (p1.x, p1.y)))
+        dst = min(range(len(coords)), key=lambda i: math.dist(coords[i], (p2.x, p2.y)))
+        import heapq
+
+        dist, prev, heap = {src: 0.0}, {}, [(0.0, src)]
+        while heap:
+            d, u = heapq.heappop(heap)
+            if u == dst:
+                break
+            if d > dist.get(u, math.inf):
+                continue
+            for v, w in adj[u]:
+                nd = d + w
+                if nd < dist.get(v, math.inf):
+                    dist[v], prev[v] = nd, u
+                    heapq.heappush(heap, (nd, v))
+        if dst not in dist:
+            return None
+        path = [dst]
+        while path[-1] != src:
+            path.append(prev[path[-1]])
+        if len(path) < 2:
             return self.segment_around(name, p1)
-        return substring(part, a, b)
+        return LineString([coords[i] for i in reversed(path)])
 
     def segment_around(self, name: str, p: Point, half: float = 25.0) -> BaseGeometry | None:
         best = None

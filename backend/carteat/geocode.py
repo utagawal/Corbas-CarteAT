@@ -122,6 +122,8 @@ class Geocoder:
                 return [idx.street_in_commune(loc["street"])], "street"
             return [], "none"
         if kind == "place":
+            if loc["name"] in idx.lieux:
+                return [idx.lieux[loc["name"]]], "precise"
             for key, name, geom in idx.places:
                 if name == loc["name"]:
                     return [geom], "precise"

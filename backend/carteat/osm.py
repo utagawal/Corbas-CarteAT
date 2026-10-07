@@ -30,6 +30,7 @@ from shapely.ops import linemerge, polygonize, unary_union
 log = logging.getLogger(__name__)
 
 SEED_PATH = Path(__file__).parent / "data" / "osm_corbas.json.gz"
+LIEUX_PATH = Path(__file__).parent / "data" / "lieux.json"
 
 # Voies routières utiles (on exclut les chemins de service privés sans nom).
 PLACE_TAGS = ("place", "amenity", "leisure", "building", "landuse", "highway", "public_transport")
@@ -214,3 +215,15 @@ def boundary_polygon(data: dict):
         return None
     g = shape(data["boundary"])
     return g if isinstance(g, (Polygon, MultiPolygon)) else None
+
+
+def load_lieux(override: Path | None = None) -> list[dict]:
+    """Lieux-dits livrés avec l'application, complétés/remplacés par `override` (même « nom »)."""
+    by_name = {l["nom"]: l for l in json.loads(LIEUX_PATH.read_text(encoding="utf-8"))["lieux"]}
+    if override and override.exists():
+        try:
+            for l in json.loads(override.read_text(encoding="utf-8")).get("lieux", []):
+                by_name[l["nom"]] = l
+        except (ValueError, KeyError) as e:
+            log.error("Fichier de lieux-dits %s invalide : %s", override, e)
+    return list(by_name.values())
