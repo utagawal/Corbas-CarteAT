@@ -46,6 +46,13 @@ class Update(BaseModel):
     note: str | None = Field(None, max_length=1000)
     statut: Literal["publie", "a_verifier", "masque"] | None = None
     geojson: dict | None = None
+    # Position de l'icône [lon, lat] choisie à la main ; null = recalculée depuis le tracé.
+    centre: tuple[float, float] | None = None
+
+
+class Troncon(BaseModel):
+    a: tuple[float, float]  # [lon, lat]
+    b: tuple[float, float]
 
 
 class Reprocess(BaseModel):
@@ -203,8 +210,16 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
                     content_change = True
                 elif k == "geojson":
                     r.geojson = v
-                    r.centre = geometry_center(v)
+                    if "centre" not in data:
+                        r.centre = geometry_center(v)
                     r.qualite_geo = "manuel" if v.get("features") else "none"
+                    content_change = True
+                elif k == "centre":
+                    if v is None:
+                        r.centre = geometry_center(r.geojson or {})
+                    else:
+                        _validate_lonlat(v)
+                        r.centre = [round(v[0], 6), round(v[1], 6)]
                     content_change = True
                 elif k != "statut":
                     setattr(r, k, v)
@@ -239,6 +254,25 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
             locs = [{"kind": "street", "street": c} for c in cited]
         res = pipeline.geocoder().geocode(locs, [])
         return {"localisations": locs, **res}
+
+    @app.post("/api/admin/troncon", dependencies=[Depends(require_admin)])
+    def admin_troncon(body: Troncon):
+        """Tronçon de la voie passant par deux points cliqués sur la carte, accroché au tracé OSM."""
+        from shapely.geometry import Point, mapping
+
+        _validate_lonlat(body.a)
+        _validate_lonlat(body.b)
+        idx = pipeline.idx
+        pa, pb = idx.from_wgs84(Point(body.a)), idx.from_wgs84(Point(body.b))
+        name = idx.common_street(pa, pb)
+        if not name:
+            raise HTTPException(422, "Les deux points ne sont pas sur une même rue (cliquez au plus près de la voie).")
+        seg = idx.segment_between(name, pa, pb)
+        if seg is None or seg.is_empty:
+            raise HTTPException(422, f"Impossible de suivre {name} entre ces deux points.")
+        return {"rue": name, "longueur_m": round(seg.length),
+                "feature": {"type": "Feature", "properties": {"role": "impact"},
+                            "geometry": mapping(idx.to_wgs84(seg))}}
 
     @app.get("/api/admin/rues", dependencies=[Depends(require_admin)])
     def admin_streets():
@@ -330,6 +364,12 @@ def admin_view(r: Arrete, today: date, full: bool) -> dict:
         d["texte"] = r.texte
         d["extraction"] = r.extraction
     return d
+
+
+def _validate_lonlat(c) -> None:
+    lon, lat = c
+    if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+        raise HTTPException(422, "Coordonnées invalides")
 
 
 def _validate_fc(fc: dict) -> None:

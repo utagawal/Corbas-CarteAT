@@ -59,6 +59,22 @@ localisation précise (adresse, carrefour, tronçon) ou rue entière expliciteme
 Les noms de voies sont reconnus même avec des erreurs d'OCR ou des variantes (« av. du 08 Mai 45 »,
 « rue Mirabeau » → « Rue Comte de Mirabeau »).
 
+### Édition des tracés (administration)
+
+Dans la fiche d'un arrêté, la carte d'édition propose :
+
+| Outil | Usage |
+|---|---|
+| **Tronçon de rue** | deux clics (début, fin) sur la même rue : le tracé suit la voie OSM, giratoires compris |
+| **Ligne libre** / **Point** | tracé à main levée, zone ponctuelle |
+| **Modifier les points** | glisser un sommet pour le déplacer, double-clic pour le supprimer |
+| **Supprimer un tracé**, **Tout effacer** | suppression |
+| **Icône** | se fait glisser à la position voulue ; « Recentrer l'icône » la replace sur le tracé |
+| **Localiser à partir du texte « Lieu »** | recalcul automatique depuis une formulation (« du 6 au 18 avenue Gabriel Péri »…) |
+
+Toute modification enregistrée fige l'arrêté : les synchronisations suivantes ne l'écrasent plus
+(« Relancer l'extraction automatique » pour revenir au calcul automatique).
+
 ### Lieux-dits
 
 Les arrêtés désignent parfois un lieu sous un nom différent de celui d'OpenStreetMap (« Parc de Loisirs »
