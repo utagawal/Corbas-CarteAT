@@ -1,0 +1,21 @@
+services:
+  carteat:
+    build: .
+    image: carteat-corbas:latest
+    container_name: carteat-corbas
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: ${PORT:-8080}
+    # Exposé uniquement en local : nginx (HTTPS) fait office de reverse proxy.
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8085}:${PORT:-8080}"
+    volumes:
+      - carteat-data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+volumes:
+  carteat-data:

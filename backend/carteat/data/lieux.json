@@ -1,0 +1,57 @@
+{
+ "_commentaire": "Lieux-dits cités dans les arrêtés sous un nom différent de celui d'OpenStreetMap, ou absents d'OSM. « osm_nom » : nom de l'objet OSM dont la géométrie est utilisée en priorité ; « geometry » : géométrie de secours (GeoJSON WGS84). Un fichier lieux.json placé dans le dossier de données (/data) complète ou remplace ces entrées (même « nom »).",
+ "lieux": [
+  {
+   "nom": "Parc de Loisirs",
+   "alias": [
+    "Parc des Loisirs",
+    "Parc de Loisirs de Corbas"
+   ],
+   "osm_nom": "Parc de Loisirs de Corbas",
+   "source": "Contour OSM leisure=park « Parc de Loisirs de Corbas » (way 1565744999) ; géométrie de secours reconstituée à partir des aires de jeux, pistes et pelouses",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       4.907573,
+       45.652473
+      ],
+      [
+       4.904979,
+       45.654861
+      ],
+      [
+       4.905049,
+       45.654932
+      ],
+      [
+       4.906996,
+       45.654928
+      ],
+      [
+       4.910348,
+       45.654843
+      ],
+      [
+       4.910356,
+       45.654635
+      ],
+      [
+       4.909298,
+       45.653442
+      ],
+      [
+       4.90875,
+       45.653017
+      ],
+      [
+       4.907573,
+       45.652473
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

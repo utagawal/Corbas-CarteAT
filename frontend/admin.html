@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Administration – Arrêtés travaux Corbas</title>
+    <link rel="icon" href="./favicon-32.png" sizes="32x32" />
+  </head>
+  <body class="admin">
+    <header class="site-header">
+      <a class="brand" href="./"><img src="./logo-corbas-blanc.png" alt="Retour à la carte publique" width="160" height="43" /></a>
+      <div class="site-title"><h1>Administration des arrêtés</h1></div>
+      <div class="admin-actions" id="admin-actions" hidden>
+        <button type="button" class="btn btn-light" id="btn-sync">Synchroniser maintenant</button>
+        <button type="button" class="btn btn-ghost" id="btn-logout">Se déconnecter</button>
+      </div>
+    </header>
+
+    <main id="admin" class="admin-main">
+      <section id="login" class="login" hidden>
+        <form id="login-form" class="card">
+          <h2>Connexion</h2>
+          <label for="pwd">Mot de passe administrateur</label>
+          <input id="pwd" type="password" autocomplete="current-password" required />
+          <p class="error" id="login-err" role="alert"></p>
+          <button class="btn" type="submit">Se connecter</button>
+        </form>
+      </section>
+
+      <section id="board" class="board" hidden>
+        <div class="board-top">
+          <div role="tablist" class="tabs" id="tabs" aria-label="Statut"></div>
+          <input type="search" id="admin-q" placeholder="Filtrer (numéro, titre, lieu)…" aria-label="Filtrer la liste" />
+          <p id="sync-info" class="muted" role="status"></p>
+        </div>
+        <div class="board-body">
+          <div class="table-wrap">
+            <table class="table" id="table">
+              <thead>
+                <tr><th scope="col">N°</th><th scope="col">Titre / lieu</th><th scope="col">Dates</th><th scope="col">Statut</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <section id="editor" class="editor" hidden aria-label="Édition de l'arrêté"></section>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/admin.ts"></script>
+  </body>
+</html>
