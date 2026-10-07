@@ -1,0 +1,153 @@
+# Carte des arrêtés travaux – Ville de Corbas
+
+Application web qui rend lisibles, sur une carte, les **arrêtés temporaires (AT)** signés par la mairie de Corbas :
+fermetures de rues, circulation alternée, stationnement neutralisé, trottoirs fermés, événements…
+
+- **Back-office automatique** : chaque jour, l'application interroge le
+  [registre officiel des actes](https://publis2low.adullact.org/registre/216902734), récupère les nouveaux arrêtés
+  numérotés `AT <numéro>/<année>`, lit le PDF (OCR), en extrait la nature de l'intervention, les mesures,
+  le calendrier et le lieu, puis géocode le lieu sur le tronçon de voie concerné.
+- **Front-office** : carte OpenStreetMap (MapLibre) de la commune, liste des arrêtés en cours et à venir, filtres
+  par période, type d'intervention et conséquences, fiche détaillée avec lien vers l'arrêté officiel.
+- **Administration** (`/admin.html`) : file « À vérifier », correction des informations et du tracé, publication.
+
+## Architecture
+
+```
+┌──────────────────────── conteneur Docker ────────────────────────┐
+│  FastAPI (uvicorn)                                                │
+│   ├─ /api/arretes, /api/meta          API publique (JSON)         │
+│   ├─ /api/admin/*                     API d'administration        │
+│   ├─ /                                front statique (Vite)       │
+│   └─ APScheduler : synchro quotidienne (6 h 15, heure de Paris)   │
+│                                                                    │
+│  Chaîne de traitement (backend/carteat)                            │
+│   registry.py  → API JSON PubliS²low (liste + PDF)                 │
+│   textract.py  → texte natif PyMuPDF, sinon OCR Tesseract (fra)    │
+│   parser.py    → règles : objet, catégorie, mesures, intervenant,  │
+│   dates.py        dates/horaires, localisations                    │
+│   streets.py   → référentiel des voies OSM de la commune           │
+│   geocode.py   → API Adresse (BAN) + tronçons OSM → GeoJSON        │
+│   pipeline.py  → orchestration, statut publié / à vérifier         │
+│                                                                    │
+│  /data (volume) : SQLite, PDF téléchargés, référentiel OSM         │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Pas d'IA externe** : l'extraction repose sur des règles adaptées au modèle d'arrêté de Corbas. Sur les
+115 arrêtés 2026 du registre, la grande majorité est lue et localisée automatiquement. Les cas
+ambigus (arrêtés permanents, lieux-dits, documents d'un autre modèle) partent dans la file
+**« À vérifier »** et ne sont pas publiés tant qu'un administrateur ne les a pas validés.
+
+Règles de publication automatique : dates trouvées, au moins une mesure de circulation/stationnement,
+localisation précise (adresse, carrefour, tronçon) ou rue entière explicitement citée, durée inférieure à un an.
+
+### Localisation
+
+| Formulation dans l'arrêté | Tracé produit |
+|---|---|
+| « au droit du 51 rue Centrale » | adresse BAN accrochée à la voie, tronçon de ±25 m |
+| « du 31 au 49 rue Eugène Delacroix », « entre le 6 et 18 avenue Gabriel Péri » | tronçon entre les deux adresses |
+| « Chemin de Grange Blanche, entre l'avenue du 8 mai 1945 et la rue Jean Macé » | tronçon entre les deux carrefours |
+| « du 14-18 rue Centrale à l'intersection rue Centrale et impasse Jules Pellet » | tronçon adresse → carrefour |
+| « la circulation, Rue Clément Ader, sera interdite » | toute la rue (dans la commune) |
+| « L'itinéraire de déviation empruntera : … » | rues de déviation (pointillés) |
+
+Les noms de voies sont reconnus même avec des erreurs d'OCR ou des variantes (« av. du 08 Mai 45 »,
+« rue Mirabeau » → « Rue Comte de Mirabeau »).
+
+### Données personnelles (RGPD)
+
+- Les noms et adresses des **particuliers** (déménagements, bennes…) ne sont jamais publiés : le titre
+  est reconstruit à partir du type d'intervention et du lieu ; l'adresse de domiciliation du demandeur
+  est retirée avant la localisation. Le texte OCR et l'objet du registre restent internes (admin).
+- Aucun cookie hors session d'administration, aucun traceur ; polices auto-hébergées (pas de Google Fonts).
+- Pages « Mentions légales » et « Déclaration d'accessibilité » fournies : **les éléments surlignés
+  (éditeur, hébergeur, DPO, contact) sont à compléter par la mairie.**
+
+### Accessibilité (RGAA)
+
+Liste accessible au clavier et aux lecteurs d'écran, équivalente à la carte ; lien d'évitement ; boutons
+de filtre `aria-pressed` ; compteur de résultats annoncé (`aria-live`) ; contrastes AA ; focus visible ;
+respect de `prefers-reduced-motion`. Un audit RGAA reste nécessaire pour déclarer un taux de conformité.
+
+## Déploiement sur map.utagawavtt.com/ATCorbas
+
+Prérequis : Docker + Docker Compose, nginx avec HTTPS (déjà en place).
+
+```bash
+git clone https://github.com/utagawal/Corbas-CarteAT.git /opt/carteat && cd /opt/carteat
+cp .env.example .env
+# 1. clé de session
+sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -base64 48 | tr -d '\n/+=')|" .env
+# 2. mot de passe administrateur (la commande affiche la ligne à coller dans .env)
+docker compose build
+docker compose run --rm carteat python -m carteat.cli hash-password
+# 3. démarrage (port 8085 en local uniquement, modifiable via HOST_PORT)
+docker compose up -d
+docker compose logs -f   # le premier import (OCR des arrêtés 2026) prend ~15-20 min
+```
+
+nginx : inclure [`deploy/nginx-ATCorbas.conf`](deploy/nginx-ATCorbas.conf) dans le bloc `server` HTTPS de
+`map.utagawavtt.com`, puis `sudo nginx -t && sudo systemctl reload nginx`.
+
+- Carte publique : https://map.utagawavtt.com/ATCorbas/
+- Administration : https://map.utagawavtt.com/ATCorbas/admin.html
+
+Mise à jour : `git pull && docker compose up -d --build`.
+
+### Intégration sur corbas.fr
+
+```html
+<iframe src="https://map.utagawavtt.com/ATCorbas/?embed=1"
+        title="Carte des travaux et événements sur la voie publique à Corbas"
+        style="width:100%;height:80vh;border:0" loading="lazy" allow="geolocation"></iframe>
+```
+
+`?embed=1` masque l'en-tête (le site hôte a déjà le sien). Les domaines autorisés à intégrer la carte se
+règlent avec `FRAME_ANCESTORS` (par défaut `corbas.fr` et ses sous-domaines). Lien direct vers un arrêté :
+`…/ATCorbas/#at=<identifiant>`.
+
+### Configuration (`.env`)
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `HOST_PORT` | 8085 | port publié sur 127.0.0.1 |
+| `PORT` | 8080 | port interne du conteneur |
+| `SECRET_KEY` | — | signature des sessions admin (**obligatoire**) |
+| `ADMIN_PASSWORD_HASH` | — | empreinte scrypt du mot de passe admin |
+| `START_YEAR` | 2026 | arrêtés importés à partir de cette année |
+| `SYNC_HOUR` / `SYNC_MINUTE` | 6 / 15 | heure de la synchro quotidienne (Europe/Paris) |
+| `NUMERO_REGEX` | `^\s*AT\s*\d+\s*/\s*\d+\s*$` | sélection des actes au registre |
+| `MAP_STYLE_URL` | OpenFreeMap Positron | style du fond de carte |
+| `FRAME_ANCESTORS` | corbas.fr | sites autorisés en iframe |
+| `BAN_URL`, `OVERPASS_URLS` | services publics | géocodage et référentiel OSM |
+
+### Commandes utiles
+
+```bash
+docker compose exec carteat python -m carteat.cli sync          # synchroniser maintenant
+docker compose exec carteat python -m carteat.cli reprocess     # ré-extraire (hors corrections manuelles)
+docker compose exec carteat python -m carteat.cli refresh-osm   # rafraîchir le référentiel des voies
+```
+
+Sauvegarde : le volume `carteat-data` (fichier `carteat.sqlite3` + PDF).
+
+## Développement
+
+```bash
+# back
+cd backend && python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt pytest
+DATA_DIR=../data ADMIN_PASSWORD=dev COOKIE_SECURE=false python -m carteat.cli serve
+pytest
+# front (proxy /api vers :8080)
+cd frontend && npm install && npm run dev
+```
+
+Tesseract (`tesseract-ocr`, `tesseract-ocr-fra`) doit être installé pour l'OCR.
+
+## Crédits
+
+Données © contributeurs OpenStreetMap (ODbL) · Base Adresse Nationale (Licence Ouverte) · fond de carte
+OpenFreeMap / OpenMapTiles · MapLibre GL JS · icônes Lucide.

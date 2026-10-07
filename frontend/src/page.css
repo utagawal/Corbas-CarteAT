@@ -1,0 +1,14 @@
+.page {
+  flex: 1;
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+  background: var(--surface);
+}
+.page h1 { font-size: 1.6rem; margin-top: 0; }
+.page h2 { font-size: 1.2rem; margin-top: 2rem; color: var(--brand); }
+.page li { margin-bottom: 4px; }
+.page .todo { background: #fff4d6; padding: 0 4px; border-radius: 3px; }
+.back-link { display: inline-block; margin-bottom: 16px; }
+.h1-like { margin: 0; font-size: 1.1rem; }

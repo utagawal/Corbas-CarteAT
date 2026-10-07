@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Travaux et événements sur la voie publique – Ville de Corbas</title>
+    <meta name="description" content="Carte des arrêtés temporaires de la Ville de Corbas : travaux, fermetures de rues, stationnement neutralisé, événements en cours et à venir." />
+    <meta name="theme-color" content="#005b94" />
+    <link rel="icon" href="./favicon-32.png" sizes="32x32" />
+    <link rel="icon" href="./favicon-192.png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+  </head>
+  <body>
+    <a class="skip-link" href="#liste">Aller à la liste des travaux</a>
+
+    <header class="site-header" role="banner">
+      <a class="brand" href="https://corbas.fr/" title="Site de la Ville de Corbas">
+        <img src="./logo-corbas-blanc.png" alt="Ville de Corbas" width="160" height="43" />
+      </a>
+      <div class="site-title">
+        <h1>Travaux et événements sur la voie publique</h1>
+        <p class="tagline">Rues fermées, stationnement, circulation : anticipez vos déplacements</p>
+      </div>
+    </header>
+
+    <main id="app" class="layout" data-view="liste">
+      <div class="view-switch" role="tablist" aria-label="Affichage">
+        <button role="tab" id="tab-liste" aria-controls="panneau" aria-selected="true" data-view="liste">Liste</button>
+        <button role="tab" id="tab-carte" aria-controls="carte-zone" aria-selected="false" data-view="carte">Carte</button>
+      </div>
+
+      <section id="panneau" class="panel" role="tabpanel" aria-labelledby="tab-liste">
+        <form class="filters" id="filtres" role="search" aria-label="Filtrer les arrêtés">
+          <div class="search">
+            <label for="recherche" class="sr-only">Rechercher une rue ou un intervenant</label>
+            <input id="recherche" type="search" placeholder="Rechercher une rue, un lieu…" autocomplete="off" />
+          </div>
+
+          <fieldset class="seg" id="f-periode">
+            <legend>Période</legend>
+          </fieldset>
+
+          <details class="more-filters" id="plus-filtres">
+            <summary>Filtres <span class="badge" id="nb-filtres" hidden></span></summary>
+            <fieldset class="chips" id="f-categories">
+              <legend>Type d'intervention</legend>
+            </fieldset>
+            <fieldset class="chips" id="f-impacts">
+              <legend>Conséquences</legend>
+            </fieldset>
+            <button type="button" class="link-btn" id="reinit">Réinitialiser les filtres</button>
+          </details>
+        </form>
+
+        <p class="result-count" id="compteur" role="status" aria-live="polite"></p>
+
+        <div id="liste" class="agenda" tabindex="-1"></div>
+        <article id="detail" class="detail" hidden tabindex="-1" aria-live="polite"></article>
+      </section>
+
+      <section id="carte-zone" class="map-zone" role="tabpanel" aria-labelledby="tab-carte">
+        <div id="carte" class="map" role="region" aria-label="Carte des travaux. La liste présente les mêmes informations."></div>
+        <details class="legend" id="legende"><summary>Légende</summary></details>
+      </section>
+    </main>
+
+    <footer class="site-footer" role="contentinfo">
+      <p>
+        Source : <a id="lien-registre" href="https://publis2low.adullact.org/registre/216902734" rel="noopener">registre officiel des actes de la Ville de Corbas</a>.
+        Seul l'arrêté publié fait foi. <span id="maj"></span>
+      </p>
+      <nav aria-label="Informations légales">
+        <a href="./mentions-legales.html">Mentions légales et données personnelles</a>
+        <a href="./accessibilite.html">Accessibilité : partiellement conforme</a>
+      </nav>
+    </footer>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
