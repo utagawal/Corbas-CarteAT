@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, create_engine, event, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -103,9 +104,14 @@ class Database:
             for table in Base.metadata.sorted_tables:
                 have = {r[1] for r in c.exec_driver_sql(f'PRAGMA table_info("{table.name}")')}
                 for col in table.columns:
-                    if col.name not in have:
+                    if col.name in have:
+                        continue
+                    try:
                         c.exec_driver_sql(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" '
                                           f'{col.type.compile(self.engine.dialect)}')
+                    except OperationalError as e:  # ajoutée entre-temps par un autre processus (CLI)
+                        if "duplicate column" not in str(e):
+                            raise
 
     @contextmanager
     def session(self):

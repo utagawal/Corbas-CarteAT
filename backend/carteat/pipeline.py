@@ -10,6 +10,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 
 from . import osm
 from .config import Settings
@@ -81,7 +82,7 @@ class Pipeline:
             msg.append("OSM : " + self.ensure_osm())
             actes = self.registry.list_at(self.s.numero_regex, self.s.start_year)
             with self.db.session() as ses:
-                existing = {a.id: a for a in ses.scalars(select(Arrete))}
+                existing = {a.id: a for a in ses.scalars(select(Arrete).options(defer(Arrete.texte)))}
             todo = [a for a in actes if a.id not in existing
                     or (existing[a.id].erreur and existing[a.id].tentatives < MAX_TENTATIVES)]
             msg.append(f"{len(actes)} AT au registre, {len(todo)} à traiter")
@@ -134,7 +135,7 @@ class Pipeline:
         modifies: list[Acte] = []
         info: list[str] = []
         with self.db.session() as ses:
-            rows = list(ses.scalars(select(Arrete)))
+            rows = list(ses.scalars(select(Arrete).options(defer(Arrete.texte))))  # texte chargé à la demande
             disparus = [r for r in rows if r.id not in par_id and not (r.suivi_registre or {}).get("retire_le")
                         and _suivi_retrait(r, self.s.start_year, today)]
             limite = max(RETRAIT_MAX_MIN, int(RETRAIT_MAX_PART * len(rows)))
@@ -157,12 +158,18 @@ class Pipeline:
                     continue
                 suivi = dict(r.suivi_registre or {})
                 if suivi.get("retire_le"):
-                    # Réapparu : on rétablit l'état d'avant, sauf si l'administrateur a statué entre-temps.
-                    if r.statut == "masque" and r.motif_verification.startswith("Retiré du registre"):
-                        r.statut = suivi.get("statut_avant") or "a_verifier"
-                        r.motif_verification = suivi.get("motif_avant") or ""
+                    statut_avant, motif_avant = suivi.get("statut_avant"), suivi.get("motif_avant")
                     for k in ("retire_le", "statut_avant", "motif_avant"):
                         suivi.pop(k, None)
+                    r.suivi_registre = suivi
+                    if not r.modifie_manuellement and not r.erreur:
+                        # Réapparu : statut recalculé (les données ont pu être retraitées pendant le retrait).
+                        self.apply_extraction(r, regeocode=False)
+                    elif r.statut == "masque" and r.motif_verification.startswith("Retiré du registre"):
+                        # Corrigé à la main (ou en erreur) : on rétablit l'état d'avant, sauf si l'administrateur
+                        # a statué entre-temps.
+                        r.statut = statut_avant or "a_verifier"
+                        r.motif_verification = motif_avant or ""
                     revenus += 1
                 if not suivi.get("signature"):
                     suivi["signature"] = a.signature()  # premier passage : on prend l'état actuel comme référence
@@ -215,7 +222,8 @@ class Pipeline:
             row.tentatives = (row.tentatives or 0) + 1
             row.suivi_registre = {**(row.suivi_registre or {}), "signature": acte.signature()}
             self.apply_extraction(row, mode=mode)
-            if maj_registre and row.modifie_manuellement and not (row.suivi_registre or {}).get("retire_le"):
+            # Un arrêté masqué volontairement par l'administrateur reste masqué.
+            if maj_registre and row.modifie_manuellement and row.statut != "masque":
                 row.statut = "a_verifier"
                 row.motif_verification = ("Arrêté modifié au registre officiel : vérifier les corrections manuelles "
                                           "(dates, rues, tracé) par rapport au nouveau document")

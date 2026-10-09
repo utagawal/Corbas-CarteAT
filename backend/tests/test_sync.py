@@ -74,6 +74,21 @@ def test_retrait_puis_reapparition(p):
     assert r3.statut == "publie" and r3.motif_verification == "" and "retire_le" not in r3.suivi_registre
 
 
+def test_reapparition_arrete_corrige_a_la_main(p):
+    p.registry.actes = [acte(i) for i in range(1, 11)]
+    p.sync()
+    with p.db.session() as ses:
+        r = ses.get(Arrete, "id4")
+        r.statut, r.motif_verification, r.modifie_manuellement = "a_verifier", "à revoir", True
+    p.registry.actes = [a for a in p.registry.actes if a.id != "id4"]
+    p.sync()
+    assert row(p, 4).statut == "masque"
+    p.registry.actes.append(acte(4))
+    p.sync()
+    r4 = row(p, 4)
+    assert (r4.statut, r4.motif_verification) == ("a_verifier", "à revoir")
+
+
 def test_disparition_massive_ignoree(p):
     p.registry.actes = [acte(i) for i in range(1, 11)]
     p.sync()
@@ -99,6 +114,13 @@ def test_modification_au_registre(p):
     r2 = row(p, 2)
     assert r2.statut == "a_verifier" and "modifié au registre" in r2.motif_verification
     assert r2.date_fin == "2026-12-31"  # correction manuelle conservée
+    # arrêté masqué volontairement par l'administrateur : reste masqué s'il est modifié au registre
+    with p.db.session() as ses:
+        ses.get(Arrete, "id1").statut = "masque"
+        ses.get(Arrete, "id1").modifie_manuellement = True
+    p.registry.actes[0] = acte(1, doc="doc3")
+    p.sync()
+    assert row(p, 1).statut == "masque"
     # rien de nouveau : pas de retraitement
     n = len(p.registry.downloads)
     p.sync()
