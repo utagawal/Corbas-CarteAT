@@ -726,6 +726,13 @@ body.home {
   font-weight: 400;
   color: var(--secondary);
 }
+.when-hint,
+.cell-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--secondary);
+}
 .when-text {
   margin: 0;
 }
