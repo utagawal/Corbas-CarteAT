@@ -267,7 +267,10 @@ function renderDetail(a: Arrete) {
     quandBlock(a),
     h('dl', { class: 'cells' },
       item('Où', a.lieu || 'Voir le document officiel'),
-      conseq ? item('Conséquences', conseq) : null,
+      conseq
+        ? item('Mesures autorisées', conseq,
+            h('p', { class: 'cell-hint' }, 'Appliquées seulement lorsque l’intervenant est sur place, pas forcément pendant toute la période.'))
+        : null,
       a.deviation.length ? item('Déviation', a.deviation.join(', ')) : null,
       a.intervenant ? item('Intervenant', a.intervenant) : null,
     ),
@@ -312,7 +315,7 @@ function quandBlock(a: Arrete): HTMLElement {
   const deb = parseDate(a.date_debut);
   const fin = parseDate(a.date_fin) ?? deb;
   const box = h('section', { class: 'when', 'aria-labelledby': 'when-title' },
-    h('h3', { class: 'when-title', id: 'when-title' }, 'Quand'));
+    h('h3', { class: 'when-title', id: 'when-title' }, 'Période autorisée'));
   if (!deb || !fin) {
     box.append(h('p', { class: 'when-text' }, 'Dates à préciser : voir le document officiel.'));
     return box;
@@ -349,6 +352,9 @@ function quandBlock(a: Arrete): HTMLElement {
   if (notes.length) {
     visual.append(h('ul', { class: 'hours' }, ...notes.map((n) => h('li', {}, icon(Clock, 14), n))));
   }
+  // Un arrêté autorise une intervention pendant une période ; il ne dit pas que le chantier l'occupe en entier.
+  box.append(h('p', { class: 'when-hint' },
+    'L’arrêté autorise l’intervention pendant cette période : les travaux n’ont pas forcément lieu tous les jours, ni toute la journée.'));
   return box;
 }
 
