@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, create_engine, event, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -54,6 +55,9 @@ class Arrete(Base):
     modifie_manuellement: Mapped[bool] = mapped_column(Boolean, default=False)
     erreur: Mapped[str] = mapped_column(Text, default="")
     tentatives: Mapped[int] = mapped_column(Integer, default=0)
+    # Suivi de l'acte au registre : empreinte des métadonnées (détection des modifications) et,
+    # s'il a disparu du registre, date du retrait et statut/motif à restaurer s'il réapparaît.
+    suivi_registre: Mapped[dict | None] = mapped_column(JSON, default=dict)
     cree_le: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     maj_le: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -91,7 +95,23 @@ class Database:
             cur.close()
 
         Base.metadata.create_all(self.engine)
+        self._add_missing_columns()
         self.Session = sessionmaker(self.engine, expire_on_commit=False)
+
+    def _add_missing_columns(self) -> None:
+        """Migration minimale : create_all ne crée pas les colonnes ajoutées à une table existante."""
+        with self.engine.begin() as c:
+            for table in Base.metadata.sorted_tables:
+                have = {r[1] for r in c.exec_driver_sql(f'PRAGMA table_info("{table.name}")')}
+                for col in table.columns:
+                    if col.name in have:
+                        continue
+                    try:
+                        c.exec_driver_sql(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" '
+                                          f'{col.type.compile(self.engine.dialect)}')
+                    except OperationalError as e:  # ajoutée entre-temps par un autre processus (CLI)
+                        if "duplicate column" not in str(e):
+                            raise
 
     @contextmanager
     def session(self):

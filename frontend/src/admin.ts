@@ -288,7 +288,7 @@ function renderEditor(a: AdminArrete) {
     h('dt', {}, 'Numéro'), h('dd', {}, a.numero),
     h('dt', {}, 'Objet au registre'), h('dd', {}, a.objet_registre || '—'),
     h('dt', {}, 'Localisation auto'), h('dd', {}, a.qualite_geo),
-    a.motif_verification ? h('dt', {}, 'À vérifier car') : null, a.motif_verification ? h('dd', {}, a.motif_verification) : null,
+    a.motif_verification ? h('dt', {}, a.statut === 'a_verifier' ? 'À vérifier car' : 'Remarque') : null, a.motif_verification ? h('dd', {}, a.motif_verification) : null,
     a.erreur ? h('dt', {}, 'Erreur') : null, a.erreur ? h('dd', { class: 'error' }, a.erreur) : null,
   );
   const docs = h('p', {},

@@ -21,6 +21,17 @@ class Acte:
     date_publication: str | None
     pdf_url: str | None
     pdf_name: str | None
+    pdf_taille: str | None = None
+
+    def signature(self) -> str:
+        """Empreinte des métadonnées publiées : change si l'acte ou son document est modifié au registre.
+
+        On retient l'identifiant du document (dernier segment de l'URL) plutôt que l'URL complète,
+        pour qu'un changement d'hôte ou de version de l'API ne fasse pas croire à une modification.
+        """
+        doc = (self.pdf_url or "").rstrip("/").rsplit("/", 1)[-1]
+        objet = " ".join(self.objet.split())
+        return "|".join([self.numero, objet, self.date_decision or "", doc, self.pdf_taille or ""])
 
 
 class Registry:
@@ -64,6 +75,7 @@ class Registry:
                 date_publication=pub or None,
                 pdf_url=pdf.get("url") if pdf else None,
                 pdf_name=pdf.get("filename") if pdf else None,
+                pdf_taille=str(pdf.get("size") or "") if pdf else None,
             )
         return list(res.values())
 

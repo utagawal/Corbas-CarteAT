@@ -75,6 +75,18 @@ Dans la fiche d'un arrêté, la carte d'édition propose :
 Toute modification enregistrée fige l'arrêté : les synchronisations suivantes ne l'écrasent plus
 (« Relancer l'extraction automatique » pour revenir au calcul automatique).
 
+### Arrêtés retirés ou modifiés au registre
+
+À chaque synchronisation, la base est comparée au registre :
+
+- **Arrêté retiré du registre** : il est masqué, avec le motif « Retiré du registre officiel ». S'il
+  réapparaît, son statut précédent est rétabli. Garde-fou : si plus de 20 % des arrêtés (et au moins 5)
+  disparaissent d'un coup, on suppose une réponse incomplète du registre et rien n'est masqué. Les actes
+  publiés depuis plus de 900 jours ne sont pas suivis (ils quittent le registre en fin de publication).
+- **Arrêté modifié au registre** (objet, date de décision ou document changé) : le PDF est retéléchargé
+  et l'arrêté retraité. S'il avait été corrigé à la main, les corrections sont conservées et l'arrêté passe
+  « à vérifier » pour comparaison avec le nouveau document.
+
 ### Lieux-dits
 
 Les arrêtés désignent parfois un lieu sous un nom différent de celui d'OpenStreetMap (« Parc de Loisirs »
