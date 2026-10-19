@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -61,7 +62,23 @@ class Settings(BaseSettings):
     auto_publish_max_days: int = 366  # au-delà : arrêté « permanent » → à vérifier
 
     # Intégration (iframe) : domaines autorisés à afficher la carte
-    frame_ancestors: str = "'self' https://corbas.fr https://*.corbas.fr"
+    frame_ancestors: str = "'self' https://corbas.fr https://*.corbas.fr https://ville-corbas.fr https://*.ville-corbas.fr"
+
+    # Fichier .env lu sans docker compose (docker run --env-file, Portainer, Kubernetes…) : les guillemets
+    # englobants et l'échappement « $$ » propres à compose y arrivent tels quels.
+    @field_validator("frame_ancestors", "admin_password_hash", "secret_key", "public_url", mode="before")
+    @classmethod
+    def _normalise_env(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] == '"':
+                v = v[1:-1]
+        return v
+
+    @field_validator("admin_password_hash", mode="after")
+    @classmethod
+    def _unescape_dollars(cls, v: str) -> str:
+        return v.replace("$$", "$")  # une empreinte scrypt ne contient jamais « $$ »
 
     @property
     def db_path(self) -> Path:

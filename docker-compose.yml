@@ -7,9 +7,10 @@ services:
     env_file: .env
     environment:
       PORT: ${PORT:-8080}
-    # Exposé uniquement en local : nginx (HTTPS) fait office de reverse proxy.
+    # Par défaut exposé uniquement en local : un reverse proxy (nginx, Apache, Caddy…) assure le HTTPS.
+    # HOST_BIND=0.0.0.0 pour un proxy situé sur une autre machine (pare-feu à prévoir).
     ports:
-      - "127.0.0.1:${HOST_PORT:-8085}:${PORT:-8080}"
+      - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-8085}:${PORT:-8080}"
     volumes:
       - carteat-data:/data
     deploy:

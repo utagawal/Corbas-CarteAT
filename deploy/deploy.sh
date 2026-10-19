@@ -58,6 +58,8 @@ flock -n 9 || { echo "Un déploiement est déjà en cours." >&2; exit 0; }
 
 HOST_PORT="$(grep -E '^HOST_PORT=' .env | tail -1 | cut -d= -f2 | tr -d '"'"'"' ' || true)"
 HOST_PORT="${HOST_PORT:-8085}"
+HOST_BIND="$(grep -E '^HOST_BIND=' .env | tail -1 | cut -d= -f2 | tr -d '"'"'"' ' || true)"
+case "${HOST_BIND:-}" in ""|0.0.0.0) HEALTH_HOST=127.0.0.1 ;; *) HEALTH_HOST="$HOST_BIND" ;; esac
 git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
 
 # ---------------------------------------------------------------- mise à jour du code
@@ -103,11 +105,11 @@ docker compose build --pull >>"$LOG" 2>&1 || rollback "construction de l'image (
 log "Redémarrage du conteneur…"
 docker compose up -d >>"$LOG" 2>&1 || rollback "démarrage du conteneur (voir $LOG)"
 
-log "Contrôle de santé sur 127.0.0.1:$HOST_PORT…"
+log "Contrôle de santé sur $HEALTH_HOST:$HOST_PORT…"
 ok=0
 for _ in $(seq 1 "$HEALTH_TIMEOUT"); do
-  if curl -fsS -m 3 "http://127.0.0.1:$HOST_PORT/healthz" >/dev/null 2>&1 \
-     && curl -fsS -m 5 "http://127.0.0.1:$HOST_PORT/api/meta" >/dev/null 2>&1; then
+  if curl -fsS -m 3 "http://$HEALTH_HOST:$HOST_PORT/healthz" >/dev/null 2>&1 \
+     && curl -fsS -m 5 "http://$HEALTH_HOST:$HOST_PORT/api/meta" >/dev/null 2>&1; then
     ok=1; break
   fi
   sleep 1
