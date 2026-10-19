@@ -130,3 +130,13 @@ def test_position_icone_manuelle(client):
     lon, lat = r.json()["centre"]
     assert 4.90 <= lon <= 4.91 and abs(lat - 45.67) < 1e-6
     assert client.put("/api/admin/arretes/a1", json={"centre": [500, 45]}, headers=h).status_code == 422
+
+
+def test_env_sans_docker_compose(monkeypatch):
+    """Valeurs d'un .env passé à « docker run --env-file » : guillemets et « $$ » conservés tels quels."""
+    hsh = hash_password("motdepasse-test-123")
+    monkeypatch.setenv("ADMIN_PASSWORD_HASH", hsh.replace("$", "$$"))
+    monkeypatch.setenv("FRAME_ANCESTORS", "\"'self' https://corbas.fr\"")
+    s = Settings(_env_file=None)
+    assert s.admin_password_hash == hsh and verify_password("motdepasse-test-123", s.admin_password_hash)
+    assert s.frame_ancestors == "'self' https://corbas.fr"

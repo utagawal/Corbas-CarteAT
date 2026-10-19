@@ -115,27 +115,81 @@ Liste accessible au clavier et aux lecteurs d'écran, équivalente à la carte ;
 de filtre `aria-pressed` ; compteur de résultats annoncé (`aria-live`) ; contrastes AA ; focus visible ;
 respect de `prefers-reduced-motion`. Un audit RGAA reste nécessaire pour déclarer un taux de conformité.
 
-## Déploiement sur maps.utagawavtt.com/ATCorbas
+## Déploiement (tout serveur Docker)
 
-Prérequis : Docker + Docker Compose, nginx avec HTTPS (déjà en place).
+L'application est un unique conteneur (interface + API + synchronisation + OCR) qui écoute en HTTP sur le
+port 8080. Le HTTPS est assuré par le reverse proxy déjà présent sur le serveur (nginx, Apache, Caddy,
+Traefik…). Elle fonctionne à la racine d'un domaine (`https://travaux.exemple.fr/`) comme sous un chemin
+(`https://www.exemple.fr/travaux/`) : toutes ses URL sont relatives, aucune reconstruction n'est nécessaire.
+
+**Prérequis** : Docker 20.10+ avec le plugin Compose (`docker compose version`), architecture x86-64 ou ARM64,
+1 Go de mémoire, accès sortant HTTPS (registre PubliS²low, Base Adresse Nationale, OpenStreetMap, fond de carte).
+
+### Installation
+
+Le dossier peut être n'importe où (ici `/opt/carteat`) ; chaque commande tient sur une ligne :
 
 ```bash
-git clone https://github.com/utagawal/Corbas-CarteAT.git /var/data/carteat-corbas && cd /var/data/carteat-corbas
-cp .env.example .env && chmod 600 .env
-# 1. clé de session
+git clone https://github.com/utagawal/Corbas-CarteAT.git /opt/carteat && cd /opt/carteat && cp .env.example .env && chmod 600 .env
 sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -base64 48 | tr -d '\n/+=')|" .env
-# 2. mot de passe administrateur (la commande affiche la ligne à coller dans .env)
-docker compose build
-docker compose run --rm carteat python -m carteat.cli hash-password
-# 3. démarrage (port 8085 en local uniquement, modifiable via HOST_PORT)
-docker compose up -d
-docker compose logs -f   # le premier import (OCR des arrêtés 2026) prend ~15-20 min
+docker compose build && docker compose run --rm carteat python -m carteat.cli hash-password
 ```
+
+La dernière commande affiche une ligne `ADMIN_PASSWORD_HASH=…` à coller dans `.env`. Adapter ensuite dans
+`.env` : `HOST_PORT` (port publié), `PUBLIC_URL` et `FRAME_ANCESTORS` (voir [Configuration](#configuration-env)).
+
+```bash
+docker compose up -d && docker compose logs -f
+```
+
+Le premier import (OCR des arrêtés depuis `START_YEAR`) prend 15 à 20 minutes ; la carte se remplit au fur et
+à mesure. Contrôle : `curl -fsS http://127.0.0.1:8085/healthz` doit répondre `{"ok":true}`.
+
+Mise à jour : `cd /opt/carteat && git pull && docker compose up -d --build`.
+
+**Sans Docker Compose** (`docker run`, Portainer, Synology, Kubernetes…) : construire l'image, puis la lancer
+avec un volume persistant monté sur `/data` et les variables de `.env` :
+
+```bash
+docker build -t carteat-corbas /opt/carteat && docker run -d --name carteat-corbas --restart unless-stopped --env-file /opt/carteat/.env -p 127.0.0.1:8085:8080 -v carteat-data:/data carteat-corbas
+```
+
+Pour un dossier de l'hôte monté sur `/data` à la place du volume nommé, le rendre accessible à l'utilisateur
+du conteneur (uid 10001) : `sudo chown -R 10001 /chemin/donnees`.
+
+### Reverse proxy HTTPS
+
+Le conteneur n'est publié que sur `127.0.0.1` (`HOST_BIND`) : seul le reverse proxy local y accède. Mettre
+`HOST_BIND=0.0.0.0` si le proxy est sur une autre machine (et filtrer le port au pare-feu).
+
+| Proxy | Configuration |
+|---|---|
+| nginx | [`deploy/nginx-generique.conf`](deploy/nginx-generique.conf) (sous-chemin `/travaux/` ou racine) |
+| Apache 2.4 | [`deploy/apache-travaux.conf`](deploy/apache-travaux.conf) (`mod_proxy`, `mod_headers`) |
+| Caddy | `handle_path /travaux/* { reverse_proxy 127.0.0.1:8085 }` + `redir /travaux /travaux/` |
+| Traefik | routeur ``PathPrefix(`/travaux`)`` + middleware `stripPrefix` (`/travaux`) vers le port 8080 |
+
+Points communs, quel que soit le proxy :
+
+- retirer le préfixe (`/travaux`) avant de transmettre, et rediriger `/travaux` vers `/travaux/` ;
+- transmettre `X-Forwarded-For` (limitation des tentatives de connexion) et `X-Forwarded-Proto: https` ;
+- sous un chemin, limiter le cookie d'administration à ce chemin (`proxy_cookie_path`, `ProxyPassReverseCookiePath`) ;
+- ne pas ajouter d'en-tête `X-Frame-Options` : c'est la politique de sécurité de l'application
+  (`FRAME_ANCESTORS`) qui autorise l'intégration en iframe ;
+- ne pas mettre en cache `/api/admin/` (les réponses publiques portent déjà leur `Cache-Control`).
+
+En HTTP simple (test en local, sans HTTPS), ajouter `COOKIE_SECURE=false` pour pouvoir se connecter à
+l'administration.
+
+### Exemple : maps.utagawavtt.com/ATCorbas (nginx + Cloudflare)
+
+Instance actuelle, code dans `/var/data/carteat-corbas` (installation ci-dessus avec ce dossier).
 
 nginx : copier [`deploy/nginx-ATCorbas.conf`](deploy/nginx-ATCorbas.conf) dans `/etc/nginx/snippets/ATCorbas.conf`,
 ajouter `include /etc/nginx/snippets/ATCorbas.conf;` dans le bloc `server` HTTPS de `maps.utagawavtt.com`
 (avant `location / {`), puis `sudo nginx -t && sudo systemctl reload nginx`. Le snippet utilise
-`location ^~` (prioritaire sur les locations regex des tuiles) et `more_set_headers` (module headers-more).
+`location ^~` (prioritaire sur les locations regex des tuiles) et `more_clear_headers` (module headers-more)
+pour retirer les en-têtes CORS et `X-Frame-Options` hérités du bloc `server`.
 
 Le dossier du code ne doit pas porter le nom du chemin public (`/var/data/ATCorbas` serait sous le
 `root /var/data/` de nginx) : d'où `/var/data/carteat-corbas`, et `.env` en `chmod 600`.
@@ -146,14 +200,13 @@ Derrière Cloudflare : ne pas activer *Rocket Loader* ni *Email obfuscation* sur
 - Carte publique : https://maps.utagawavtt.com/ATCorbas/
 - Administration : https://maps.utagawavtt.com/ATCorbas/admin.html
 
-Mise à jour : `cd /var/data/carteat-corbas && git pull && docker compose up -d --build`.
-
 ### Déploiement automatique
 
 [`deploy/deploy.sh`](deploy/deploy.sh) récupère `main`, reconstruit l'image, redémarre le conteneur,
 vérifie que l'application répond (sinon **retour automatique à la version précédente**), puis met à jour
 le snippet nginx s'il a changé (testé par `nginx -t` avant rechargement). Sans nouveauté sur `main`, il ne
-fait rien. Journal : `/var/log/carteat-deploy.log`.
+fait rien. Journal : `/var/log/carteat-deploy.log`. Il fonctionne quel que soit le dossier d'installation ;
+sur un serveur sans nginx (ou avec une autre configuration), ajouter `--no-nginx`.
 
 | Action | Commande |
 |---|---|
@@ -166,23 +219,81 @@ fait rien. Journal : `/var/log/carteat-deploy.log`.
 Une version qui a échoué n'est pas retentée par le cron (relancer avec `--force` après correction).
 Le déploiement est refusé si le dossier contient des modifications locales non committées.
 
-### Intégration sur corbas.fr
+## Intégration dans un site
+
+### Iframe (tout site)
 
 ```html
-<iframe src="https://maps.utagawavtt.com/ATCorbas/?embed=1"
-        title="Carte des travaux et événements sur la voie publique à Corbas"
-        style="width:100%;height:80vh;border:0" loading="lazy" allow="geolocation"></iframe>
+<iframe src="https://maps.utagawavtt.com/ATCorbas/?embed=1" title="Carte des travaux et événements sur la voie publique à Corbas" style="display:block;width:100%;height:80vh;min-height:520px;border:0" loading="lazy" allow="geolocation"></iframe>
 ```
 
-`?embed=1` masque l'en-tête (le site hôte a déjà le sien). Les domaines autorisés à intégrer la carte se
-règlent avec `FRAME_ANCESTORS` (par défaut `corbas.fr` et ses sous-domaines). Lien direct vers un arrêté :
-`…/ATCorbas/#at=<identifiant>`.
+`?embed=1` masque l'en-tête (le site hôte a déjà le sien). Le site hôte doit figurer dans `FRAME_ANCESTORS`
+(par défaut `corbas.fr`, `ville-corbas.fr` et leurs sous-domaines), sinon le navigateur refuse l'affichage.
+Lien direct vers un arrêté : `…/ATCorbas/#at=<identifiant>`.
 
-### Configuration (`.env`)
+### WordPress (corbas.fr)
+
+Deux possibilités, sans toucher au thème :
+
+1. **Bloc « HTML personnalisé »** (éditeur Gutenberg) : créer une page, insérer un bloc *HTML personnalisé*
+   et y coller le code de l'iframe ci-dessus. Le bloc n'est proposé qu'aux administrateurs et éditeurs
+   (droit `unfiltered_html`) ; pour les autres rôles, WordPress supprime l'iframe à l'enregistrement.
+2. **Extension fournie** (recommandé) : [`deploy/wordpress/carte-travaux-corbas.php`](deploy/wordpress/carte-travaux-corbas.php).
+   La copier dans `wp-content/plugins/` (ou la compresser en `.zip` et l'importer depuis *Extensions →
+   Ajouter*), l'activer, puis écrire dans n'importe quelle page :
+
+   ```
+   [carte_travaux]
+   ```
+
+   Options : `[carte_travaux hauteur="90vh"]`, `[carte_travaux url="https://corbas.fr/travaux/"]`. L'adresse par
+   défaut se change aussi dans `wp-config.php` : `define('CARTEAT_URL', 'https://…/');`. Le code court
+   fonctionne quel que soit le rôle du rédacteur, ajoute un lien « Ouvrir la carte en plein écran » et
+   transmet à la carte un lien direct de la forme `https://corbas.fr/la-page/#at=<identifiant>`.
+
+Conseils de mise en page : choisir le modèle de page **pleine largeur** du thème ; un bandeau de cookies
+(Complianz, Tarteaucitron, CookieYes…) ne doit pas bloquer l'iframe : l'outil ne dépose aucun cookie ni
+traceur, il peut être déclaré comme « fonctionnel ». Si le site hôte envoie une politique de sécurité
+(`Content-Security-Policy`), elle doit autoriser l'adresse de la carte dans `frame-src`.
+
+### Adresse www.corbas.fr/travaux
+
+Aujourd'hui, `https://corbas.fr/travaux/` affiche l'archive de la catégorie WordPress « Travaux » (4 articles),
+et `www.corbas.fr` redirige vers `corbas.fr`. Trois solutions, de la plus simple à la plus intégrée :
+
+| Solution | Résultat | Ce qu'il faut |
+|---|---|---|
+| **A. Page WordPress** | page `/travaux/` du site avec la carte en iframe, sous l'en-tête et le menu de corbas.fr | accès éditeur WordPress |
+| **B. Redirection** | `/travaux` renvoie vers `https://maps.utagawavtt.com/ATCorbas/` | extension *Redirection* ou accès à `.htaccess` |
+| **C. Reverse proxy** | l'outil lui-même servi sous `https://corbas.fr/travaux/` (pleine page, adresse conservée) | accès à la configuration Apache du serveur |
+
+**A. Page WordPress** (recommandé)
+1. Libérer l'adresse : dans *Articles → Catégories*, renommer le **slug** de la catégorie « Travaux » (par
+   exemple `actualites-travaux`), sinon elle reste prioritaire sur l'adresse `/travaux/`.
+2. Créer une page « Travaux », slug `travaux`, modèle pleine largeur, avec le code court `[carte_travaux]`
+   (ou le bloc HTML personnalisé). Les articles de la catégorie peuvent être listés sous la carte avec un bloc
+   *Liste des derniers articles* filtré sur la catégorie.
+
+**B. Redirection** : avec l'extension *Redirection*, source `/travaux`, cible
+`https://maps.utagawavtt.com/ATCorbas/`, type 302 (temporaire tant que l'adresse finale n'est pas arrêtée).
+Ou dans le `.htaccess` de WordPress, avant `# BEGIN WordPress` : `RedirectMatch 302 ^/travaux/?$ https://maps.utagawavtt.com/ATCorbas/`.
+
+**C. Reverse proxy** : ajouter [`deploy/apache-travaux.conf`](deploy/apache-travaux.conf) au `VirtualHost` HTTPS
+de corbas.fr (hébergeur ou DSI : les directives `ProxyPass` ne sont pas autorisées dans `.htaccess`), avec :
+- variante A si le conteneur est installé sur le serveur de la ville (installation ci-dessus) ;
+- variante B pour relayer l'instance de `maps.utagawavtt.com`. Dans ce cas, toutes les requêtes arrivent
+  chez Cloudflare avec l'adresse du serveur de la ville : y désactiver le contrôle anti-robots pour cette
+  adresse, et utiliser l'administration par son adresse d'origine.
+
+Rien à modifier dans l'application : ses adresses sont relatives et le fichier fourni limite le cookie
+d'administration au chemin `/travaux/`.
+
+## Configuration (`.env`)
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `HOST_PORT` | 8085 | port publié sur 127.0.0.1 |
+| `HOST_PORT` | 8085 | port publié sur l'hôte |
+| `HOST_BIND` | 127.0.0.1 | adresse d'écoute publiée (`0.0.0.0` : toutes les interfaces) |
 | `PORT` | 8080 | port interne du conteneur |
 | `SECRET_KEY` | — | signature des sessions admin (**obligatoire**) |
 | `ADMIN_PASSWORD_HASH` | — | empreinte scrypt du mot de passe admin |
@@ -190,10 +301,12 @@ règlent avec `FRAME_ANCESTORS` (par défaut `corbas.fr` et ses sous-domaines). 
 | `SYNC_HOUR` / `SYNC_MINUTE` | 6 / 15 | heure de la synchro quotidienne (Europe/Paris) |
 | `NUMERO_REGEX` | `^\s*AT\s*\d+\s*/\s*\d+\s*$` | sélection des actes au registre |
 | `MAP_STYLE_URL` | OpenFreeMap Positron | style du fond de carte |
-| `FRAME_ANCESTORS` | corbas.fr | sites autorisés en iframe |
+| `FRAME_ANCESTORS` | corbas.fr, ville-corbas.fr | sites autorisés à intégrer la carte en iframe |
+| `COOKIE_SECURE` | true | `false` uniquement pour un test en HTTP simple |
+| `PUBLIC_URL` | — | adresse publique (informative) |
 | `BAN_URL`, `OVERPASS_URLS` | services publics | géocodage et référentiel OSM |
 
-### Commandes utiles
+## Commandes utiles
 
 ```bash
 docker compose exec carteat python -m carteat.cli sync          # synchroniser maintenant
